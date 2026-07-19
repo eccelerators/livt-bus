@@ -1,0 +1,49 @@
+namespace Livt.Bus.Tests.Avalon
+
+using Livt.Bus.Avalon
+using Livt.Bus.Avalon.Testing
+
+@Test
+component AvalonMasterTest
+{
+	master: AvalonMaster
+	slave: AvalonTestSlave
+
+	new()
+	{
+		this.master = new AvalonMaster()
+		this.slave = new AvalonTestSlave(this.master)
+	}
+
+	@Test
+	fn RunsDelayedMaskedAndResponseTransactions()
+	{
+		this.slave.Clear()
+		var timeoutTicks = this.context.TicksFor(2us)
+		this.master.SetTimeoutTicks(timeoutTicks)
+		this.slave.Configure(3 as uint, 0b00)
+
+		assert this.master.TryWrite32(0x08 as uint, 0x11223344 as uint, 0b1111)
+		assert this.master.TryWrite32(0x08 as uint, 0xAA00CC00 as uint, 0b1010)
+		assert this.master.TryRead32(0x08 as uint)
+		assert this.master.LastReadValue() == (0xAA22CC44 as uint)
+		assert this.master.LastResponse() == AvalonMaster.RESPONSE_OKAY
+
+		this.slave.Configure(0 as uint, 0b10)
+		assert this.master.TryRead32(0x08 as uint)
+		assert this.master.LastResponse() == 0b10
+		assert this.master.read == 0b0
+		assert this.master.write == 0b0
+		assert this.master.byteenable == 0b0000
+	}
+
+	@Test
+	fn ReportsTimeout()
+	{
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.Configure(20 as uint, 0b00)
+		assert this.master.TryRead32(0x00 as uint) == false
+		assert this.master.LastTimedOut()
+		assert this.master.read == 0b0
+	}
+}

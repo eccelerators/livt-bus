@@ -1,0 +1,49 @@
+namespace Livt.Bus.Tests.Wishbone
+
+using Livt.Bus.Wishbone.Testing
+
+@Test
+component WishboneTestMasterTest
+{
+	master: WishboneTestMaster
+	slave: WishboneTestSlave
+
+	new()
+	{
+		this.master = new WishboneTestMaster()
+		this.slave = new WishboneTestSlave(this.master)
+	}
+
+	@Test
+	fn ExercisesVerificationApi()
+	{
+		this.slave.Clear()
+		var timeoutTicks = this.context.TicksFor(2us)
+		this.master.SetTimeoutTicks(timeoutTicks)
+		assert this.master.GetTimeoutTicks() == timeoutTicks
+		this.slave.ConfigureAckDelay(2 as uint)
+
+		this.master.Write32(0x08 as uint, 0x11223344 as uint)
+		this.master.Verify32(0x08 as uint, 0x11223344 as uint)
+		this.master.WriteMasked32(0x08 as uint, 0xAA00CC00 as uint, 0b1010)
+		this.master.VerifyMasked32(0x08 as uint, 0xAA22CC44 as uint, 0xFFFFFFFF as uint)
+
+		this.master.Write8(0x09 as uint, 0x5A as byte)
+		this.master.Verify8(0x09 as uint, 0x5A as byte)
+		assert this.master.Read8(0x09 as uint) == (0x5A as byte)
+
+		this.master.Write16(0x0A as uint, 0xCAFE as Logic[16])
+		this.master.Verify16(0x0A as uint, 0xCAFE as Logic[16])
+		assert this.master.Read16(0x0A as uint) == (0xCAFE as Logic[16])
+		assert this.master.Read32(0x08 as uint) == (0xCAFE5A44 as uint)
+	}
+
+	@Test
+	fn ExposesNonAssertingTimeoutApi()
+	{
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.ConfigureAckDelay(20 as uint)
+		assert this.master.TryRead32(0x00 as uint) == false
+		assert this.master.LastTimedOut()
+	}
+}

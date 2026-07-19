@@ -1,0 +1,40 @@
+namespace Livt.Bus
+
+/**
+ * Non-asserting transaction API for a 32-bit, byte-addressed memory-mapped bus.
+ */
+interface IMemoryMappedMaster32
+{
+	/**
+	 * Sets the maximum number of context clock ticks to wait for a handshake stage.
+	 */
+	fn SetTimeoutTicks(timeoutTicks: uint)
+
+	/**
+	 * Returns the currently configured transaction timeout in context clock ticks.
+	 */
+	fn GetTimeoutTicks() uint
+
+	/**
+	 * Starts a 32-bit write at a byte address using one enable bit per byte lane.
+	 * Returns true when the protocol handshake completes, even if a protocol-specific
+	 * response reports an error. Returns false after a timeout.
+	 */
+	fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+
+	/**
+	 * Starts a 32-bit read at a byte address.
+	 * Returns true when the protocol handshake completes and false after a timeout.
+	 */
+	fn TryRead32(address: uint) bool
+
+	/**
+	 * Returns the value captured by the most recently completed read.
+	 */
+	fn LastReadValue() uint
+
+	/**
+	 * Returns true when the most recent transaction ended because of its timeout.
+	 */
+	fn LastTimedOut() bool
+}

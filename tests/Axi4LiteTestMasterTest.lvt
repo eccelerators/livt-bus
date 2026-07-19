@@ -1,0 +1,71 @@
+namespace Livt.Bus.Tests
+
+using Livt.Bus.Axi4Lite
+using Livt.Bus.Axi4Lite.Testing
+
+@Test
+component Axi4LiteTestMasterTest
+{
+	master: Axi4LiteTestMaster
+	slave: Axi4LiteTestSlave
+
+	new()
+	{
+		this.master = new Axi4LiteTestMaster()
+		this.slave = new Axi4LiteTestSlave(this.master)
+	}
+
+	@Test
+	fn TestAxi4LiteTransactions()
+	{
+		this.slave.Clear()
+		var timeoutTicks = this.context.TicksFor(2us)
+		this.master.SetTimeoutTicks(timeoutTicks)
+
+		this.slave.ConfigureDelays(0, 3, 2, 1, 2)
+		this.master.Write32(0x00000004 as uint, 0x12345678 as uint)
+		assert this.master.Read32(0x00000004 as uint) == (0x12345678 as uint)
+		this.master.Verify32(0x00000004 as uint, 0x12345678 as uint)
+
+		this.slave.ConfigureDelays(3, 0, 1, 2, 1)
+		this.master.Write32(0x00000008 as uint, 0xA5A55A5A as uint)
+		this.master.VerifyMasked32(0x00000008 as uint, 0x00005A00 as uint, 0x0000FF00 as uint)
+
+		this.slave.ConfigureDelays(0, 0, 0, 0, 0)
+		this.slave.ConfigureResponses(0b00, 0b00)
+		this.master.Write32(0x0000000C as uint, 0x11223344 as uint)
+		this.master.WriteMasked32(0x0000000C as uint, 0xAABBCCDD as uint, 0b0101)
+		assert this.master.Read32(0x0000000C as uint) == (0x11BB33DD as uint)
+		this.master.Write8(0x0000000D as uint, 0xEE as byte)
+		this.master.Verify8(0x0000000D as uint, 0xEE as byte)
+		assert this.master.Read32(0x0000000C as uint) == (0x11BBEEDD as uint)
+		this.master.Write16(0x0000000E as uint, 0xCAFE as Logic[16])
+		this.master.Verify16(0x0000000E as uint, 0xCAFE as Logic[16])
+		assert this.master.Read8(0x0000000D as uint) == (0xEE as byte)
+		assert this.master.Read16(0x0000000E as uint) == (0xCAFE as Logic[16])
+		assert this.master.Read32(0x0000000C as uint) == (0xCAFEEEDD as uint)
+
+		this.slave.ConfigureResponses(0b10, 0b11)
+		var writeCompleted = this.master.TryWrite32(0x00000010 as uint, 0x01020304 as uint, 0b1111)
+		assert writeCompleted
+		assert this.master.LastResponse() == 0b10
+
+		var readCompleted = this.master.TryRead32(0x00000010 as uint)
+		assert readCompleted
+		assert this.master.LastReadValue() == (0x01020304 as uint)
+		assert this.master.LastResponse() == 0b11
+		assert this.master.awvalid == 0b0
+		assert this.master.wvalid == 0b0
+		assert this.master.bready == 0b0
+		assert this.master.arvalid == 0b0
+		assert this.master.rready == 0b0
+
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.ConfigureResponses(0b00, 0b00)
+		this.slave.ConfigureDelays(20, 20, 0, 0, 0)
+
+		var completed = this.master.TryWrite32(0x00000014 as uint, 0x55AA55AA as uint, 0b1111)
+		assert completed == false
+		assert this.master.LastTimedOut()
+	}
+}

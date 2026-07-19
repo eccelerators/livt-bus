@@ -1,0 +1,169 @@
+namespace Livt.Bus.Avalon
+
+using Livt.Bus
+
+/**
+ * Reusable 32-bit Avalon-MM transaction master for non-pipelined transfers.
+ */
+component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
+{
+	/**
+	 * Avalon response code for a successful request.
+	 */
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	/**
+	 * Byte-enable value selecting all four data lanes.
+	 */
+	public const ALL_BYTES: Logic[4] = 0b1111
+
+	timeoutTicks: uint
+	lastReadValue: uint
+	lastResponse: Logic[2]
+	lastTimedOut: bool
+
+	new()
+	{
+		this.address = 0x00000000
+		this.byteenable = 0b0000
+		this.write = 0b0
+		this.writedata = 0x00000000
+		this.read = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastReadValue = 0
+		this.lastResponse = RESPONSE_OKAY
+		this.lastTimedOut = false
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for waitrequest to be deasserted.
+	 */
+	override fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for a request.
+	 */
+	override fn GetTimeoutTicks() uint
+	{
+		return this.timeoutTicks
+	}
+
+	/**
+	 * Returns the data captured by the most recently accepted read.
+	 */
+	override fn LastReadValue() uint
+	{
+		return this.lastReadValue
+	}
+
+	/**
+	 * Returns the Avalon response captured for the most recent accepted request.
+	 */
+	public fn LastResponse() Logic[2]
+	{
+		return this.lastResponse
+	}
+
+	/**
+	 * Returns true when the most recent request timed out.
+	 */
+	override fn LastTimedOut() bool
+	{
+		return this.lastTimedOut
+	}
+
+	/**
+	 * Performs one non-pipelined Avalon-MM write using the selected byte lanes.
+	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 */
+	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.address = address as Logic[32]
+			this.byteenable = byteEnable
+			this.writedata = value as Logic[32]
+			this.read = 0b0
+			this.write = 0b1
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.waitrequest == 0b0) {
+				this.lastResponse = this.response
+				successful = true
+				goto Finish
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				this.lastTimedOut = true
+				successful = false
+				goto Finish
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Finish {
+			this.write = 0b0
+			this.byteenable = 0b0000
+		}
+		return successful
+	}
+
+	/**
+	 * Performs one non-pipelined Avalon-MM read and stores the accepted read data.
+	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 */
+	override fn TryRead32(address: uint) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastReadValue = 0
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.address = address as Logic[32]
+			this.byteenable = ALL_BYTES
+			this.write = 0b0
+			this.read = 0b1
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.waitrequest == 0b0) {
+				this.lastReadValue = this.readdata as uint
+				this.lastResponse = this.response
+				successful = true
+				goto Finish
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				this.lastTimedOut = true
+				successful = false
+				goto Finish
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Finish {
+			this.read = 0b0
+			this.byteenable = 0b0000
+		}
+		return successful
+	}
+}

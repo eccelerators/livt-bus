@@ -1,0 +1,41 @@
+namespace Livt.Bus.Avalon
+
+/**
+ * Avalon memory-mapped signal contract with 32-bit byte addresses and data.
+ * Directions are relative to the bus master.
+ */
+interface IAvalon32Master
+{
+	/**
+	 * Byte address for the current read or write request.
+	 */
+	address: out Logic[32]
+	/**
+	 * Enables the corresponding byte lanes during a write.
+	 */
+	byteenable: out Logic[4]
+	/**
+	 * Requests a write while asserted.
+	 */
+	write: out logic
+	/**
+	 * Data presented for a write request.
+	 */
+	writedata: out Logic[32]
+	/**
+	 * Requests a read while asserted.
+	 */
+	read: out logic
+	/**
+	 * Data returned for an accepted read request.
+	 */
+	readdata: in Logic[32]
+	/**
+	 * Stalls the current request while asserted.
+	 */
+	waitrequest: in logic
+	/**
+	 * Response code returned for the accepted request.
+	 */
+	response: in Logic[2]
+}

@@ -1,0 +1,249 @@
+namespace Livt.Bus.Axi4Lite.Testing
+
+using Livt.Bus.Axi4Lite
+
+/**
+ * Configurable AXI4-Lite slave used to verify the public test master.
+ */
+component Axi4LiteTestSlave
+{
+	bus: IAxi4Lite32Master
+	registers: uint[16]
+	awDelay: uint
+	wDelay: uint
+	bDelay: uint
+	arDelay: uint
+	rDelay: uint
+	configuredWriteResponse: Logic[2]
+	configuredReadResponse: Logic[2]
+
+	new(bus: flip IAxi4Lite32Master)
+	{
+		this.bus = bus
+		this.bus.awready = 0b0
+		this.bus.wready = 0b0
+		this.bus.bvalid = 0b0
+		this.bus.bresp = 0b00
+		this.bus.arready = 0b0
+		this.bus.rvalid = 0b0
+		this.bus.rdata = 0x00000000
+		this.bus.rresp = 0b00
+		this.awDelay = 0
+		this.wDelay = 0
+		this.bDelay = 0
+		this.arDelay = 0
+		this.rDelay = 0
+		this.configuredWriteResponse = 0b00
+		this.configuredReadResponse = 0b00
+	}
+
+	/**
+	 * Configures clock-tick delays for write address, write data, write response,
+	 * read address, and read data handshakes respectively.
+	 */
+	public fn ConfigureDelays(awDelay: uint, wDelay: uint, bDelay: uint, arDelay: uint, rDelay: uint)
+	{
+		state Apply {
+			this.awDelay = awDelay
+			this.wDelay = wDelay
+			this.bDelay = bDelay
+			this.arDelay = arDelay
+			this.rDelay = rDelay
+		}
+	}
+
+	/**
+	 * Configures the two-bit AXI response returned by subsequent writes and reads.
+	 */
+	public fn ConfigureResponses(writeResponse: Logic[2], readResponse: Logic[2])
+	{
+		state Apply {
+			this.configuredWriteResponse = writeResponse
+			this.configuredReadResponse = readResponse
+		}
+	}
+
+	/**
+	 * Clears all sixteen 32-bit words in the target model.
+	 */
+	public fn Clear()
+	{
+		var index: int = 0
+		while (index < 16) {
+			this.registers[index] = 0
+			index = index + 1
+		}
+	}
+
+	process Run()
+	{
+		var awTicks: uint = 0
+		var wTicks: uint = 0
+		var bTicks: uint = 0
+		var arTicks: uint = 0
+		var rTicks: uint = 0
+		var addressAccepted: bool = false
+		var dataAccepted: bool = false
+		var capturedWriteAddress: uint = 0
+		var capturedWriteData: uint = 0
+		var capturedWriteStrobe: Logic[4] = 0b0000
+		var capturedReadAddress: uint = 0
+		var registerIndex: int = 0
+		var nextValue: uint = 0
+
+		state Idle {
+			this.bus.awready = 0b0
+			this.bus.wready = 0b0
+			this.bus.bvalid = 0b0
+			this.bus.arready = 0b0
+			this.bus.rvalid = 0b0
+			addressAccepted = false
+			dataAccepted = false
+			awTicks = 0
+			wTicks = 0
+			bTicks = 0
+			arTicks = 0
+			rTicks = 0
+
+			if (this.bus.awvalid == 0b1 || this.bus.wvalid == 0b1) {
+				goto WriteTransfer
+			}
+			elif (this.bus.arvalid == 0b1) {
+				goto ReadAddress
+			}
+			else {
+				goto Idle
+			}
+		}
+
+		state WriteTransfer {
+			if (addressAccepted == false) {
+				if (awTicks >= this.awDelay) {
+					this.bus.awready = 0b1
+					if (this.bus.awvalid == 0b1) {
+						capturedWriteAddress = this.bus.awaddr as uint
+						addressAccepted = true
+					}
+				}
+				else {
+					awTicks = awTicks + 1
+				}
+			}
+
+			if (dataAccepted == false) {
+				if (wTicks >= this.wDelay) {
+					this.bus.wready = 0b1
+					if (this.bus.wvalid == 0b1) {
+						capturedWriteData = this.bus.wdata as uint
+						capturedWriteStrobe = this.bus.wstrb
+						dataAccepted = true
+					}
+				}
+				else {
+					wTicks = wTicks + 1
+				}
+			}
+
+			if (addressAccepted && dataAccepted) {
+				goto WriteApply
+			}
+			else {
+				goto WriteTransfer
+			}
+		}
+
+		state WriteApply {
+			this.bus.awready = 0b0
+			this.bus.wready = 0b0
+			registerIndex = (capturedWriteAddress >> 2) as int
+			if (registerIndex >= 0 && registerIndex < 16) {
+				nextValue = this.registers[registerIndex]
+				if (capturedWriteStrobe[0] == 0b1) {
+					nextValue = (nextValue & (0xFFFFFF00 as uint)) | (capturedWriteData & (0x000000FF as uint))
+				}
+				if (capturedWriteStrobe[1] == 0b1) {
+					nextValue = (nextValue & (0xFFFF00FF as uint)) | (capturedWriteData & (0x0000FF00 as uint))
+				}
+				if (capturedWriteStrobe[2] == 0b1) {
+					nextValue = (nextValue & (0xFF00FFFF as uint)) | (capturedWriteData & (0x00FF0000 as uint))
+				}
+				if (capturedWriteStrobe[3] == 0b1) {
+					nextValue = (nextValue & (0x00FFFFFF as uint)) | (capturedWriteData & (0xFF000000 as uint))
+				}
+				this.registers[registerIndex] = nextValue
+			}
+			bTicks = 0
+			goto WriteResponseDelay
+		}
+
+		state WriteResponseDelay {
+			if (bTicks >= this.bDelay) {
+				this.bus.bresp = this.configuredWriteResponse
+				this.bus.bvalid = 0b1
+				goto WriteResponse
+			}
+			else {
+				bTicks = bTicks + 1
+				goto WriteResponseDelay
+			}
+		}
+
+		state WriteResponse {
+			if (this.bus.bready == 0b1) {
+				this.bus.bvalid = 0b0
+				goto Idle
+			}
+			else {
+				goto WriteResponse
+			}
+		}
+
+		state ReadAddress {
+			if (arTicks >= this.arDelay) {
+				this.bus.arready = 0b1
+				if (this.bus.arvalid == 0b1) {
+					capturedReadAddress = this.bus.araddr as uint
+					rTicks = 0
+					goto ReadDataDelay
+				}
+				else {
+					goto ReadAddress
+				}
+			}
+			else {
+				arTicks = arTicks + 1
+				goto ReadAddress
+			}
+		}
+
+		state ReadDataDelay {
+			this.bus.arready = 0b0
+			if (rTicks >= this.rDelay) {
+				registerIndex = (capturedReadAddress >> 2) as int
+				if (registerIndex >= 0 && registerIndex < 16) {
+					this.bus.rdata = this.registers[registerIndex] as Logic[32]
+				}
+				else {
+					this.bus.rdata = 0x00000000
+				}
+				this.bus.rresp = this.configuredReadResponse
+				this.bus.rvalid = 0b1
+				goto ReadData
+			}
+			else {
+				rTicks = rTicks + 1
+				goto ReadDataDelay
+			}
+		}
+
+		state ReadData {
+			if (this.bus.rready == 0b1) {
+				this.bus.rvalid = 0b0
+				goto Idle
+			}
+			else {
+				goto ReadData
+			}
+		}
+	}
+}

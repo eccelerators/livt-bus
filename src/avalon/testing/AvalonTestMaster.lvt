@@ -1,0 +1,324 @@
+namespace Livt.Bus.Avalon.Testing
+
+using Livt.Bus
+using Livt.Bus.Avalon
+
+/**
+ * Assertion-oriented Avalon-MM master for component and register tests.
+ */
+component AvalonTestMaster : IAvalon32Master, IMemoryMappedBus32
+{
+	/**
+	 * Avalon response code for a successful request.
+	 */
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	/**
+	 * Byte-enable value selecting all four data lanes.
+	 */
+	public const ALL_BYTES: Logic[4] = 0b1111
+
+	timeoutTicks: uint
+	lastReadValue: uint
+	lastResponse: Logic[2]
+	lastTimedOut: bool
+
+	new()
+	{
+		this.address = 0x00000000
+		this.byteenable = 0b0000
+		this.write = 0b0
+		this.writedata = 0x00000000
+		this.read = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastReadValue = 0
+		this.lastResponse = RESPONSE_OKAY
+		this.lastTimedOut = false
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for waitrequest to be deasserted.
+	 */
+	public fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for a request.
+	 */
+	public fn GetTimeoutTicks() uint
+	{
+		return this.timeoutTicks
+	}
+
+	/**
+	 * Returns the data captured by the most recently accepted read.
+	 */
+	public fn LastReadValue() uint
+	{
+		return this.lastReadValue
+	}
+
+	/**
+	 * Returns the Avalon response captured for the most recent accepted request.
+	 */
+	public fn LastResponse() Logic[2]
+	{
+		return this.lastResponse
+	}
+
+	/**
+	 * Returns true when the most recent request timed out.
+	 */
+	public fn LastTimedOut() bool
+	{
+		return this.lastTimedOut
+	}
+
+	/**
+	 * Performs one non-pipelined Avalon-MM write using the selected byte lanes.
+	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 */
+	public fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.address = address as Logic[32]
+			this.byteenable = byteEnable
+			this.writedata = value as Logic[32]
+			this.read = 0b0
+			this.write = 0b1
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.waitrequest == 0b0) {
+				this.lastResponse = this.response
+				successful = true
+				goto Finish
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				this.lastTimedOut = true
+				successful = false
+				goto Finish
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Finish {
+			this.write = 0b0
+			this.byteenable = 0b0000
+		}
+		return successful
+	}
+
+	/**
+	 * Performs one non-pipelined Avalon-MM read and stores the accepted read data.
+	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 */
+	public fn TryRead32(address: uint) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastReadValue = 0
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.address = address as Logic[32]
+			this.byteenable = ALL_BYTES
+			this.write = 0b0
+			this.read = 0b1
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.waitrequest == 0b0) {
+				this.lastReadValue = this.readdata as uint
+				this.lastResponse = this.response
+				successful = true
+				goto Finish
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				this.lastTimedOut = true
+				successful = false
+				goto Finish
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Finish {
+			this.read = 0b0
+			this.byteenable = 0b0000
+		}
+		return successful
+	}
+
+	/**
+	 * Writes one byte and asserts completion with an Avalon OKAY response.
+	 */
+	override fn Write8(address: uint, value: byte)
+	{
+		var lane = (address & (3 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var shiftedValue = (value as uint) << shift
+		var byteEnable: Logic[4] = 0b0001
+		if (lane == 1) {
+			byteEnable = 0b0010
+		}
+		elif (lane == 2) {
+			byteEnable = 0b0100
+		}
+		elif (lane == 3) {
+			byteEnable = 0b1000
+		}
+		var completed = this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Writes one aligned halfword and asserts completion with an Avalon OKAY response.
+	 */
+	override fn Write16(address: uint, value: Logic[16])
+	{
+		assert (address & (1 as uint)) == (0 as uint)
+		var lane = (address & (2 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var shiftedValue = (value as uint) << shift
+		var byteEnable: Logic[4] = 0b0011
+		if (lane == 2) {
+			byteEnable = 0b1100
+		}
+		var completed = this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Writes one word and asserts completion with an Avalon OKAY response.
+	 */
+	override fn Write32(address: uint, value: uint)
+	{
+		var completed = this.TryWrite32(address, value, ALL_BYTES)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Writes selected byte lanes and asserts completion with an Avalon OKAY response.
+	 */
+	override fn WriteMasked32(address: uint, value: uint, byteEnable: Logic[4])
+	{
+		var completed = this.TryWrite32(address, value, byteEnable)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Reads one byte and asserts completion with an Avalon OKAY response.
+	 */
+	override fn Read8(address: uint) byte
+	{
+		var lane = (address & (3 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		return (this.lastReadValue >> shift) as byte
+	}
+
+	/**
+	 * Reads one aligned halfword and asserts completion with an Avalon OKAY response.
+	 */
+	override fn Read16(address: uint) Logic[16]
+	{
+		assert (address & (1 as uint)) == (0 as uint)
+		var lane = (address & (2 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		return (this.lastReadValue >> shift) as Logic[16]
+	}
+
+	/**
+	 * Reads one word and asserts completion with an Avalon OKAY response.
+	 */
+	override fn Read32(address: uint) uint
+	{
+		var completed = this.TryRead32(address)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		return this.lastReadValue
+	}
+
+	/**
+	 * Reads one byte and asserts that it equals the expected value.
+	 */
+	override fn Verify8(address: uint, expected: byte)
+	{
+		var lane = (address & (3 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert ((this.lastReadValue >> shift) as byte) == expected
+	}
+
+	/**
+	 * Reads one halfword and asserts that it equals the expected value.
+	 */
+	override fn Verify16(address: uint, expected: Logic[16])
+	{
+		assert (address & (1 as uint)) == (0 as uint)
+		var lane = (address & (2 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert ((this.lastReadValue >> shift) as Logic[16]) == expected
+	}
+
+	/**
+	 * Reads one word and asserts that it equals the expected value.
+	 */
+	override fn Verify32(address: uint, expected: uint)
+	{
+		var completed = this.TryRead32(address)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert this.lastReadValue == expected
+	}
+
+	/**
+	 * Reads one word and compares only bits selected by the mask.
+	 */
+	override fn VerifyMasked32(address: uint, expected: uint, mask: uint)
+	{
+		var completed = this.TryRead32(address)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert (this.lastReadValue & mask) == (expected & mask)
+	}
+}

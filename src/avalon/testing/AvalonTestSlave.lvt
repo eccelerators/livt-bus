@@ -1,0 +1,107 @@
+namespace Livt.Bus.Avalon.Testing
+
+using Livt.Bus.Avalon
+
+/**
+ * Configurable non-pipelined Avalon-MM register model for master tests.
+ */
+component AvalonTestSlave
+{
+	bus: IAvalon32Master
+	registers: uint[16]
+	requestDelay: uint
+	configuredResponse: Logic[2]
+
+	new(bus: flip IAvalon32Master)
+	{
+		this.bus = bus
+		this.bus.readdata = 0x00000000
+		this.bus.waitrequest = 0b1
+		this.bus.response = 0b00
+		this.requestDelay = 0
+		this.configuredResponse = 0b00
+	}
+
+	/**
+	 * Sets the request delay in clock ticks and the response returned on acceptance.
+	 */
+	public fn Configure(requestDelay: uint, response: Logic[2])
+	{
+		state Apply {
+			this.requestDelay = requestDelay
+			this.configuredResponse = response
+		}
+	}
+
+	/**
+	 * Clears all sixteen 32-bit words in the target model.
+	 */
+	public fn Clear()
+	{
+		var index: int = 0
+		while (index < 16) {
+			this.registers[index] = 0
+			index = index + 1
+		}
+	}
+
+	process Run()
+	{
+		var elapsed: uint = 0
+		var registerIndex: int = 0
+		var nextValue: uint = 0
+
+		state Idle {
+			this.bus.waitrequest = 0b1
+			elapsed = 0
+			if (this.bus.write == 0b1 || this.bus.read == 0b1) {
+				goto WaitForAcceptance
+			}
+			else {
+				goto Idle
+			}
+		}
+
+		state WaitForAcceptance {
+			if (elapsed >= this.requestDelay) {
+				registerIndex = ((this.bus.address as uint) >> 2) as int
+				if (this.bus.write == 0b1 && registerIndex >= 0 && registerIndex < 16) {
+					nextValue = this.registers[registerIndex]
+					if (this.bus.byteenable[0] == 0b1) {
+						nextValue = (nextValue & (0xFFFFFF00 as uint)) | ((this.bus.writedata as uint) & (0x000000FF as uint))
+					}
+					if (this.bus.byteenable[1] == 0b1) {
+						nextValue = (nextValue & (0xFFFF00FF as uint)) | ((this.bus.writedata as uint) & (0x0000FF00 as uint))
+					}
+					if (this.bus.byteenable[2] == 0b1) {
+						nextValue = (nextValue & (0xFF00FFFF as uint)) | ((this.bus.writedata as uint) & (0x00FF0000 as uint))
+					}
+					if (this.bus.byteenable[3] == 0b1) {
+						nextValue = (nextValue & (0x00FFFFFF as uint)) | ((this.bus.writedata as uint) & (0xFF000000 as uint))
+					}
+					this.registers[registerIndex] = nextValue
+				}
+				if (this.bus.read == 0b1) {
+					if (registerIndex >= 0 && registerIndex < 16) {
+						this.bus.readdata = this.registers[registerIndex] as Logic[32]
+					}
+					else {
+						this.bus.readdata = 0x00000000
+					}
+				}
+				this.bus.response = this.configuredResponse
+				this.bus.waitrequest = 0b0
+				goto Accepted
+			}
+			else {
+				elapsed = elapsed + 1
+				goto WaitForAcceptance
+			}
+		}
+
+		state Accepted {
+			this.bus.waitrequest = 0b1
+			goto Idle
+		}
+	}
+}

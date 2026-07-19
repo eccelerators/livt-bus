@@ -1,0 +1,25 @@
+[project]
+name = "Livt.Bus"
+version = "0.2.0"
+path = "src"
+outdir = "out"
+
+[tests]
+path = "tests"
+components = [
+    "Axi4LiteMasterTest",
+    "Axi4LiteTestMasterTest",
+    "Axi4LiteWriteResponseTimeoutTest",
+    "Axi4LiteReadAddressTimeoutTest",
+    "Axi4LiteReadDataTimeoutTest",
+    "AvalonMasterTest",
+    "AvalonTestMasterTest",
+    "WishboneMasterTest",
+    "WishboneTestMasterTest"
+]
+
+[build.debug]
+warnings = ["all"]
+
+[build.release]
+warnings = ["all"]

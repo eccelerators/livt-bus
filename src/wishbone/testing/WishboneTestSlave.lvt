@@ -1,0 +1,102 @@
+namespace Livt.Bus.Wishbone.Testing
+
+using Livt.Bus.Wishbone
+
+/**
+ * Configurable Wishbone Classic register model for master tests.
+ */
+component WishboneTestSlave
+{
+	bus: IWishbone32Master
+	registers: uint[16]
+	ackDelay: uint
+
+	new(bus: flip IWishbone32Master)
+	{
+		this.bus = bus
+		this.bus.datout = 0x00000000
+		this.bus.ack = 0b0
+		this.ackDelay = 0
+	}
+
+	/**
+	 * Sets the number of clock ticks to wait before asserting ack.
+	 */
+	public fn ConfigureAckDelay(ackDelay: uint)
+	{
+		state Apply {
+			this.ackDelay = ackDelay
+		}
+	}
+
+	/**
+	 * Clears all sixteen 32-bit words in the target model.
+	 */
+	public fn Clear()
+	{
+		var index: int = 0
+		while (index < 16) {
+			this.registers[index] = 0
+			index = index + 1
+		}
+	}
+
+	process Run()
+	{
+		var elapsed: uint = 0
+		var registerIndex: int = 0
+		var nextValue: uint = 0
+
+		state Idle {
+			this.bus.ack = 0b0
+			elapsed = 0
+			if (this.bus.cyc == 0b1 && this.bus.stb == 0b1) {
+				goto WaitForAck
+			}
+			else {
+				goto Idle
+			}
+		}
+
+		state WaitForAck {
+			if (elapsed >= this.ackDelay) {
+				registerIndex = ((this.bus.adr as uint) >> 2) as int
+				if (this.bus.we == 0b1 && registerIndex >= 0 && registerIndex < 16) {
+					nextValue = this.registers[registerIndex]
+					if (this.bus.sel[0] == 0b1) {
+						nextValue = (nextValue & (0xFFFFFF00 as uint)) | ((this.bus.datin as uint) & (0x000000FF as uint))
+					}
+					if (this.bus.sel[1] == 0b1) {
+						nextValue = (nextValue & (0xFFFF00FF as uint)) | ((this.bus.datin as uint) & (0x0000FF00 as uint))
+					}
+					if (this.bus.sel[2] == 0b1) {
+						nextValue = (nextValue & (0xFF00FFFF as uint)) | ((this.bus.datin as uint) & (0x00FF0000 as uint))
+					}
+					if (this.bus.sel[3] == 0b1) {
+						nextValue = (nextValue & (0x00FFFFFF as uint)) | ((this.bus.datin as uint) & (0xFF000000 as uint))
+					}
+					this.registers[registerIndex] = nextValue
+				}
+				if (this.bus.we == 0b0) {
+					if (registerIndex >= 0 && registerIndex < 16) {
+						this.bus.datout = this.registers[registerIndex] as Logic[32]
+					}
+					else {
+						this.bus.datout = 0x00000000
+					}
+				}
+				this.bus.ack = 0b1
+				goto Acknowledge
+			}
+			else {
+				elapsed = elapsed + 1
+				goto WaitForAck
+			}
+		}
+
+		state Acknowledge {
+			this.bus.ack = 0b0
+			goto Idle
+		}
+	}
+}

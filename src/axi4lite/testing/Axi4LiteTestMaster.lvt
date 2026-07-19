@@ -1,0 +1,410 @@
+namespace Livt.Bus.Axi4Lite.Testing
+
+using Livt.Bus
+using Livt.Bus.Axi4Lite
+
+/**
+ * AXI4-Lite transaction master intended for component and register tests.
+ */
+component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
+{
+	/**
+	 * AXI response code for a successful normal access.
+	 */
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	/**
+	 * AXI response code for a successful exclusive access.
+	 */
+	public const RESPONSE_EXOKAY: Logic[2] = 0b01
+	/**
+	 * AXI response code for a target-reported slave error.
+	 */
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
+	/**
+	 * AXI response code for an address decode error.
+	 */
+	public const RESPONSE_DECERR: Logic[2] = 0b11
+	/**
+	 * Byte-enable value selecting all four data lanes.
+	 */
+	public const ALL_BYTES: Logic[4] = 0b1111
+
+	timeoutTicks: uint
+	lastReadValue: uint
+	lastResponse: Logic[2]
+	lastTimedOut: bool
+
+	new()
+	{
+		this.awaddr = 0x00000000
+		this.awprot = 0b000
+		this.awvalid = 0b0
+		this.wdata = 0x00000000
+		this.wstrb = 0b0000
+		this.wvalid = 0b0
+		this.bready = 0b0
+		this.araddr = 0x00000000
+		this.arprot = 0b000
+		this.arvalid = 0b0
+		this.rready = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastReadValue = 0
+		this.lastResponse = RESPONSE_OKAY
+		this.lastTimedOut = false
+	}
+
+	/**
+	 * Sets the timeout applied independently to each AXI handshake stage.
+	 */
+	public fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the timeout applied independently to each AXI handshake stage.
+	 */
+	public fn GetTimeoutTicks() uint
+	{
+		return this.timeoutTicks
+	}
+
+	/**
+	 * Returns the data captured by the most recently completed read.
+	 */
+	public fn LastReadValue() uint
+	{
+		return this.lastReadValue
+	}
+
+	/**
+	 * Returns the AXI response captured by the most recently completed transaction.
+	 */
+	public fn LastResponse() Logic[2]
+	{
+		return this.lastResponse
+	}
+
+	/**
+	 * Returns true when the most recent transaction timed out.
+	 */
+	public fn LastTimedOut() bool
+	{
+		return this.lastTimedOut
+	}
+
+	/**
+	 * Performs a non-asserting AXI4-Lite write using the selected byte lanes.
+	 * Returns true after a response handshake; inspect LastResponse for its status.
+	 */
+	public fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var addressAccepted: bool = false
+		var dataAccepted: bool = false
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			addressAccepted = false
+			dataAccepted = false
+			elapsed = 0
+			successful = false
+			this.awaddr = address as Logic[32]
+			this.awprot = 0b000
+			this.awvalid = 0b1
+			this.wdata = value as Logic[32]
+			this.wstrb = byteEnable
+			this.wvalid = 0b1
+			this.bready = 0b0
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.awready == 0b1) {
+				addressAccepted = true
+				this.awvalid = 0b0
+			}
+			if (this.wready == 0b1) {
+				dataAccepted = true
+				this.wvalid = 0b0
+			}
+
+			if (addressAccepted && dataAccepted) {
+				this.bready = 0b1
+				elapsed = 0
+				goto Response
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Response {
+			if (this.bvalid == 0b1) {
+				this.lastResponse = this.bresp
+				goto Complete
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Response
+			}
+		}
+
+		state Complete {
+			this.awvalid = 0b0
+			this.wvalid = 0b0
+			this.bready = 0b0
+			this.lastTimedOut = false
+			successful = true
+			goto Finish
+		}
+
+		state Timeout {
+			this.awvalid = 0b0
+			this.wvalid = 0b0
+			this.bready = 0b0
+			this.lastTimedOut = true
+			successful = false
+			goto Finish
+		}
+
+		state Finish {}
+		return successful
+	}
+
+	/**
+	 * Performs a non-asserting AXI4-Lite read and stores the returned data.
+	 * Returns true after a data handshake; inspect LastResponse for its status.
+	 */
+	public fn TryRead32(address: uint) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastReadValue = 0
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.araddr = address as Logic[32]
+			this.arprot = 0b000
+			this.arvalid = 0b1
+			this.rready = 0b0
+			goto Address
+		}
+
+		state Address {
+			if (this.arready == 0b1) {
+				this.arvalid = 0b0
+				this.rready = 0b1
+				elapsed = 0
+				goto Data
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Address
+			}
+		}
+
+		state Data {
+			if (this.rvalid == 0b1) {
+				this.lastReadValue = this.rdata as uint
+				this.lastResponse = this.rresp
+				goto Complete
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Data
+			}
+		}
+
+		state Complete {
+			this.arvalid = 0b0
+			this.rready = 0b0
+			this.lastTimedOut = false
+			successful = true
+			goto Finish
+		}
+
+		state Timeout {
+			this.arvalid = 0b0
+			this.rready = 0b0
+			this.lastTimedOut = true
+			successful = false
+			goto Finish
+		}
+
+		state Finish {}
+		return successful
+	}
+
+	/**
+	 * Writes one byte and asserts completion with an AXI OKAY response.
+	 */
+	override fn Write8(address: uint, value: byte)
+	{
+		var lane = (address & (3 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var shiftedValue = (value as uint) << shift
+		var byteEnable: Logic[4] = 0b0001
+		if (lane == 1) {
+			byteEnable = 0b0010
+		}
+		elif (lane == 2) {
+			byteEnable = 0b0100
+		}
+		elif (lane == 3) {
+			byteEnable = 0b1000
+		}
+		var completed = this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Writes one aligned halfword and asserts completion with an AXI OKAY response.
+	 */
+	override fn Write16(address: uint, value: Logic[16])
+	{
+		assert (address & (1 as uint)) == (0 as uint)
+		var lane = (address & (2 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var shiftedValue = (value as uint) << shift
+		var byteEnable: Logic[4] = 0b0011
+		if (lane == 2) {
+			byteEnable = 0b1100
+		}
+		var completed = this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Writes one word and asserts completion with an AXI OKAY response.
+	 */
+	override fn Write32(address: uint, value: uint)
+	{
+		var completed = this.TryWrite32(address, value, ALL_BYTES)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Writes selected byte lanes and asserts completion with an AXI OKAY response.
+	 */
+	override fn WriteMasked32(address: uint, value: uint, byteEnable: Logic[4])
+	{
+		var completed = this.TryWrite32(address, value, byteEnable)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+	}
+
+	/**
+	 * Reads one byte and asserts completion with an AXI OKAY response.
+	 */
+	override fn Read8(address: uint) byte
+	{
+		var lane = (address & (3 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		return (this.lastReadValue >> shift) as byte
+	}
+
+	/**
+	 * Reads one aligned halfword and asserts completion with an AXI OKAY response.
+	 */
+	override fn Read16(address: uint) Logic[16]
+	{
+		assert (address & (1 as uint)) == (0 as uint)
+		var lane = (address & (2 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		return (this.lastReadValue >> shift) as Logic[16]
+	}
+
+	/**
+	 * Reads one word and asserts completion with an AXI OKAY response.
+	 */
+	override fn Read32(address: uint) uint
+	{
+		var completed = this.TryRead32(address)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		return this.lastReadValue
+	}
+
+	/**
+	 * Reads one byte and asserts that it equals the expected value.
+	 */
+	override fn Verify8(address: uint, expected: byte)
+	{
+		var lane = (address & (3 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert ((this.lastReadValue >> shift) as byte) == expected
+	}
+
+	/**
+	 * Reads one halfword and asserts that it equals the expected value.
+	 */
+	override fn Verify16(address: uint, expected: Logic[16])
+	{
+		assert (address & (1 as uint)) == (0 as uint)
+		var lane = (address & (2 as uint)) as int
+		var shift = lane * 8
+		var alignedAddress = address & (0xFFFFFFFC as uint)
+		var completed = this.TryRead32(alignedAddress)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert ((this.lastReadValue >> shift) as Logic[16]) == expected
+	}
+
+	/**
+	 * Reads one word and asserts that it equals the expected value.
+	 */
+	override fn Verify32(address: uint, expected: uint)
+	{
+		var completed = this.TryRead32(address)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert this.lastReadValue == expected
+	}
+
+	/**
+	 * Reads one word and compares only bits selected by the mask.
+	 */
+	override fn VerifyMasked32(address: uint, expected: uint, mask: uint)
+	{
+		var completed = this.TryRead32(address)
+		assert completed
+		assert this.lastResponse == RESPONSE_OKAY
+		assert (this.lastReadValue & mask) == (expected & mask)
+	}
+}

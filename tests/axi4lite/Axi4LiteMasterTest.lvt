@@ -1,0 +1,61 @@
+namespace Livt.Bus.Tests.Axi4Lite
+
+using Livt.Bus.Axi4Lite
+using Livt.Bus.Axi4Lite.Testing
+
+@Test
+component Axi4LiteMasterTest
+{
+	master: Axi4LiteMaster
+	slave: Axi4LiteTestSlave
+
+	new()
+	{
+		this.master = new Axi4LiteMaster()
+		this.slave = new Axi4LiteTestSlave(this.master)
+	}
+
+	@Test
+	fn RunsReusableTransactions()
+	{
+		this.slave.Clear()
+		var timeoutTicks = this.context.TicksFor(2us)
+		this.master.SetTimeoutTicks(timeoutTicks)
+		this.slave.ConfigureDelays(2, 0, 2, 1, 2)
+
+		assert this.master.TryWrite32(0x04 as uint, 0x12345678 as uint, 0b1111)
+		assert this.master.LastResponse() == Axi4LiteMaster.RESPONSE_OKAY
+		assert this.master.TryRead32(0x04 as uint)
+		assert this.master.LastReadValue() == (0x12345678 as uint)
+
+		assert this.master.TryWrite32(0x04 as uint, 0x00AA00CC as uint, 0b0101)
+		assert this.master.TryRead32(0x04 as uint)
+		assert this.master.LastReadValue() == (0x12AA56CC as uint)
+		assert this.master.LastTimedOut() == false
+
+		this.slave.ConfigureResponses(0b10, 0b11)
+		assert this.master.TryWrite32(0x08 as uint, 0xA5A55A5A as uint, 0b1111)
+		assert this.master.LastResponse() == 0b10
+		assert this.master.TryRead32(0x08 as uint)
+		assert this.master.LastResponse() == 0b11
+
+		assert this.master.awvalid == 0b0
+		assert this.master.wvalid == 0b0
+		assert this.master.bready == 0b0
+		assert this.master.arvalid == 0b0
+		assert this.master.rready == 0b0
+	}
+
+	@Test
+	fn ReportsTimeout()
+	{
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.ConfigureResponses(0b00, 0b00)
+		this.slave.ConfigureDelays(20, 20, 0, 0, 0)
+		assert this.master.TryWrite32(0x00 as uint, 0x55AA55AA as uint, 0b1111) == false
+		assert this.master.LastTimedOut()
+		assert this.master.awvalid == 0b0
+		assert this.master.wvalid == 0b0
+		assert this.master.bready == 0b0
+	}
+}

@@ -1,0 +1,89 @@
+namespace Livt.Bus.Axi4Lite
+
+/**
+ * AXI4-Lite signal contract with 32-bit byte addresses and 32-bit data.
+ * Directions are relative to the bus master.
+ */
+interface IAxi4Lite32Master
+{
+	/**
+	 * Byte address presented on the write-address channel.
+	 */
+	awaddr: out Logic[32]
+	/**
+	 * AXI protection attributes for the write transaction.
+	 */
+	awprot: out Logic[3]
+	/**
+	 * Indicates that the write address is valid.
+	 */
+	awvalid: out logic
+	/**
+	 * Indicates that the target accepts the write address.
+	 */
+	awready: in logic
+
+	/**
+	 * Data presented on the write-data channel.
+	 */
+	wdata: out Logic[32]
+	/**
+	 * Enables the corresponding byte lanes of wdata.
+	 */
+	wstrb: out Logic[4]
+	/**
+	 * Indicates that write data and strobes are valid.
+	 */
+	wvalid: out logic
+	/**
+	 * Indicates that the target accepts the write data.
+	 */
+	wready: in logic
+
+	/**
+	 * Response code returned for the completed write.
+	 */
+	bresp: in Logic[2]
+	/**
+	 * Indicates that a write response is available.
+	 */
+	bvalid: in logic
+	/**
+	 * Indicates that the master accepts the write response.
+	 */
+	bready: out logic
+
+	/**
+	 * Byte address presented on the read-address channel.
+	 */
+	araddr: out Logic[32]
+	/**
+	 * AXI protection attributes for the read transaction.
+	 */
+	arprot: out Logic[3]
+	/**
+	 * Indicates that the read address is valid.
+	 */
+	arvalid: out logic
+	/**
+	 * Indicates that the target accepts the read address.
+	 */
+	arready: in logic
+
+	/**
+	 * Data returned on the read-data channel.
+	 */
+	rdata: in Logic[32]
+	/**
+	 * Response code returned with the read data.
+	 */
+	rresp: in Logic[2]
+	/**
+	 * Indicates that read data and its response are valid.
+	 */
+	rvalid: in logic
+	/**
+	 * Indicates that the master accepts the read data.
+	 */
+	rready: out logic
+}

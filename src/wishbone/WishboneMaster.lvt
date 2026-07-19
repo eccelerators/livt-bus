@@ -1,0 +1,155 @@
+namespace Livt.Bus.Wishbone
+
+using Livt.Bus
+
+/**
+ * Reusable 32-bit Wishbone Classic single-transfer master.
+ */
+component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
+{
+	/**
+	 * Byte-select value enabling all four data lanes.
+	 */
+	public const ALL_BYTES: Logic[4] = 0b1111
+
+	timeoutTicks: uint
+	lastReadValue: uint
+	lastTimedOut: bool
+
+	new()
+	{
+		this.adr = 0x00000000
+		this.sel = 0b0000
+		this.we = 0b0
+		this.stb = 0b0
+		this.datin = 0x00000000
+		this.cyc = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastReadValue = 0
+		this.lastTimedOut = false
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for a Wishbone acknowledgement.
+	 */
+	override fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for an acknowledgement.
+	 */
+	override fn GetTimeoutTicks() uint
+	{
+		return this.timeoutTicks
+	}
+
+	/**
+	 * Returns the data captured by the most recently acknowledged read.
+	 */
+	override fn LastReadValue() uint
+	{
+		return this.lastReadValue
+	}
+
+	/**
+	 * Returns true when the most recent transfer timed out without acknowledgement.
+	 */
+	override fn LastTimedOut() bool
+	{
+		return this.lastTimedOut
+	}
+
+	/**
+	 * Performs one Wishbone Classic write and returns true when ack is received.
+	 */
+	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.adr = address as Logic[32]
+			this.sel = byteEnable
+			this.we = 0b1
+			this.datin = value as Logic[32]
+			this.stb = 0b1
+			this.cyc = 0b1
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.ack == 0b1) {
+				successful = true
+				goto Finish
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				this.lastTimedOut = true
+				successful = false
+				goto Finish
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Finish {
+			this.cyc = 0b0
+			this.stb = 0b0
+			this.we = 0b0
+			this.sel = 0b0000
+		}
+		return successful
+	}
+
+	/**
+	 * Performs one Wishbone Classic read and returns true when ack is received.
+	 */
+	override fn TryRead32(address: uint) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastReadValue = 0
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.adr = address as Logic[32]
+			this.sel = ALL_BYTES
+			this.we = 0b0
+			this.stb = 0b1
+			this.cyc = 0b1
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.ack == 0b1) {
+				this.lastReadValue = this.datout as uint
+				successful = true
+				goto Finish
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				this.lastTimedOut = true
+				successful = false
+				goto Finish
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Finish {
+			this.cyc = 0b0
+			this.stb = 0b0
+			this.sel = 0b0000
+		}
+		return successful
+	}
+}

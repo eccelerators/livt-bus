@@ -1,0 +1,47 @@
+namespace Livt.Bus.Tests.Wishbone
+
+using Livt.Bus.Wishbone
+using Livt.Bus.Wishbone.Testing
+
+@Test
+component WishboneMasterTest
+{
+	master: WishboneMaster
+	slave: WishboneTestSlave
+
+	new()
+	{
+		this.master = new WishboneMaster()
+		this.slave = new WishboneTestSlave(this.master)
+	}
+
+	@Test
+	fn RunsDelayedAndMaskedTransactions()
+	{
+		this.slave.Clear()
+		var timeoutTicks = this.context.TicksFor(2us)
+		this.master.SetTimeoutTicks(timeoutTicks)
+		this.slave.ConfigureAckDelay(3 as uint)
+
+		assert this.master.TryWrite32(0x0C as uint, 0x12345678 as uint, 0b1111)
+		assert this.master.TryWrite32(0x0C as uint, 0xAA00CC00 as uint, 0b1010)
+		assert this.master.TryRead32(0x0C as uint)
+		assert this.master.LastReadValue() == (0xAA34CC78 as uint)
+		assert this.master.LastTimedOut() == false
+		assert this.master.cyc == 0b0
+		assert this.master.stb == 0b0
+		assert this.master.we == 0b0
+		assert this.master.sel == 0b0000
+	}
+
+	@Test
+	fn ReportsTimeout()
+	{
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.ConfigureAckDelay(20 as uint)
+		assert this.master.TryWrite32(0x00 as uint, 0x55AA55AA as uint, 0b1111) == false
+		assert this.master.LastTimedOut()
+		assert this.master.cyc == 0b0
+		assert this.master.stb == 0b0
+	}
+}

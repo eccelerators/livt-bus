@@ -1,0 +1,41 @@
+namespace Livt.Bus.Wishbone
+
+/**
+ * Wishbone Classic signal contract with 32-bit byte addresses and data.
+ * Directions are relative to the bus master.
+ */
+interface IWishbone32Master
+{
+	/**
+	 * Byte address for the current bus cycle.
+	 */
+	adr: out Logic[32]
+	/**
+	 * Enables the corresponding byte lanes of the transfer.
+	 */
+	sel: out Logic[4]
+	/**
+	 * Selects a write when high and a read when low.
+	 */
+	we: out logic
+	/**
+	 * Indicates a valid transfer within the active bus cycle.
+	 */
+	stb: out logic
+	/**
+	 * Data presented by the master during writes.
+	 */
+	datin: out Logic[32]
+	/**
+	 * Indicates that a Wishbone bus cycle is active.
+	 */
+	cyc: out logic
+	/**
+	 * Data returned by the target during reads.
+	 */
+	datout: in Logic[32]
+	/**
+	 * Acknowledges completion of the current transfer.
+	 */
+	ack: in logic
+}

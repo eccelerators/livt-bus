@@ -1,0 +1,80 @@
+namespace Livt.Bus.Tests
+
+using Livt.Bus.Axi4Lite
+using Livt.Bus.Axi4Lite.Testing
+
+@Test
+component Axi4LiteWriteResponseTimeoutTest
+{
+	master: Axi4LiteTestMaster
+	slave: Axi4LiteTestSlave
+
+	new()
+	{
+		this.master = new Axi4LiteTestMaster()
+		this.slave = new Axi4LiteTestSlave(this.master)
+	}
+
+	@Test
+	fn TimesOutWhileWaitingForWriteResponse()
+	{
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.ConfigureDelays(0, 0, 20, 0, 0)
+		var completed = this.master.TryWrite32(0x00 as uint, 0x12345678 as uint, 0b1111)
+		assert completed == false
+		assert this.master.LastTimedOut()
+		assert this.master.awvalid == 0b0
+		assert this.master.wvalid == 0b0
+		assert this.master.bready == 0b0
+	}
+}
+
+@Test
+component Axi4LiteReadAddressTimeoutTest
+{
+	master: Axi4LiteTestMaster
+	slave: Axi4LiteTestSlave
+
+	new()
+	{
+		this.master = new Axi4LiteTestMaster()
+		this.slave = new Axi4LiteTestSlave(this.master)
+	}
+
+	@Test
+	fn TimesOutWhileWaitingForReadAddress()
+	{
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.ConfigureDelays(0, 0, 0, 20, 0)
+		var completed = this.master.TryRead32(0x00 as uint)
+		assert completed == false
+		assert this.master.LastTimedOut()
+		assert this.master.arvalid == 0b0
+		assert this.master.rready == 0b0
+	}
+}
+
+@Test
+component Axi4LiteReadDataTimeoutTest
+{
+	master: Axi4LiteTestMaster
+	slave: Axi4LiteTestSlave
+
+	new()
+	{
+		this.master = new Axi4LiteTestMaster()
+		this.slave = new Axi4LiteTestSlave(this.master)
+	}
+
+	@Test
+	fn TimesOutWhileWaitingForReadData()
+	{
+		this.master.SetTimeoutTicks(2 as uint)
+		this.slave.ConfigureDelays(0, 0, 0, 0, 20)
+		var completed = this.master.TryRead32(0x00 as uint)
+		assert completed == false
+		assert this.master.LastTimedOut()
+		assert this.master.arvalid == 0b0
+		assert this.master.rready == 0b0
+	}
+}

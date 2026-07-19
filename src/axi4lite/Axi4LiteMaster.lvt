@@ -1,0 +1,256 @@
+namespace Livt.Bus.Axi4Lite
+
+using Livt.Bus
+
+/**
+ * Reusable AXI4-Lite transaction master with independent channel handshakes.
+ */
+component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
+{
+	/**
+	 * AXI response code for a successful normal access.
+	 */
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	/**
+	 * AXI response code for a successful exclusive access.
+	 */
+	public const RESPONSE_EXOKAY: Logic[2] = 0b01
+	/**
+	 * AXI response code for a target-reported slave error.
+	 */
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
+	/**
+	 * AXI response code for an address decode error.
+	 */
+	public const RESPONSE_DECERR: Logic[2] = 0b11
+	/**
+	 * Byte-enable value selecting all four data lanes.
+	 */
+	public const ALL_BYTES: Logic[4] = 0b1111
+
+	timeoutTicks: uint
+	lastReadValue: uint
+	lastResponse: Logic[2]
+	lastTimedOut: bool
+
+	new()
+	{
+		this.awaddr = 0x00000000
+		this.awprot = 0b000
+		this.awvalid = 0b0
+		this.wdata = 0x00000000
+		this.wstrb = 0b0000
+		this.wvalid = 0b0
+		this.bready = 0b0
+		this.araddr = 0x00000000
+		this.arprot = 0b000
+		this.arvalid = 0b0
+		this.rready = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastReadValue = 0
+		this.lastResponse = RESPONSE_OKAY
+		this.lastTimedOut = false
+	}
+
+	/**
+	 * Sets the timeout applied independently to each AXI handshake stage.
+	 */
+	override fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the timeout applied independently to each AXI handshake stage.
+	 */
+	override fn GetTimeoutTicks() uint
+	{
+		return this.timeoutTicks
+	}
+
+	/**
+	 * Returns the data captured by the most recently completed read.
+	 */
+	override fn LastReadValue() uint
+	{
+		return this.lastReadValue
+	}
+
+	/**
+	 * Returns the AXI response captured by the most recently completed transaction.
+	 */
+	public fn LastResponse() Logic[2]
+	{
+		return this.lastResponse
+	}
+
+	/**
+	 * Returns true when the most recent transaction timed out.
+	 */
+	override fn LastTimedOut() bool
+	{
+		return this.lastTimedOut
+	}
+
+	/**
+	 * Performs one AXI4-Lite write using the selected byte lanes.
+	 * Returns true after a response handshake; inspect LastResponse for its status.
+	 */
+	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var addressAccepted: bool = false
+		var dataAccepted: bool = false
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			addressAccepted = false
+			dataAccepted = false
+			elapsed = 0
+			successful = false
+			this.awaddr = address as Logic[32]
+			this.awprot = 0b000
+			this.awvalid = 0b1
+			this.wdata = value as Logic[32]
+			this.wstrb = byteEnable
+			this.wvalid = 0b1
+			this.bready = 0b0
+			goto Transfer
+		}
+
+		state Transfer {
+			if (this.awready == 0b1) {
+				addressAccepted = true
+				this.awvalid = 0b0
+			}
+			if (this.wready == 0b1) {
+				dataAccepted = true
+				this.wvalid = 0b0
+			}
+
+			if (addressAccepted && dataAccepted) {
+				this.bready = 0b1
+				elapsed = 0
+				goto Response
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Response {
+			if (this.bvalid == 0b1) {
+				this.lastResponse = this.bresp
+				goto Complete
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Response
+			}
+		}
+
+		state Complete {
+			this.awvalid = 0b0
+			this.wvalid = 0b0
+			this.bready = 0b0
+			this.lastTimedOut = false
+			successful = true
+			goto Finish
+		}
+
+		state Timeout {
+			this.awvalid = 0b0
+			this.wvalid = 0b0
+			this.bready = 0b0
+			this.lastTimedOut = true
+			successful = false
+			goto Finish
+		}
+
+		state Finish {}
+		return successful
+	}
+
+	/**
+	 * Performs one AXI4-Lite read and stores its data for LastReadValue.
+	 * Returns true after a data handshake; inspect LastResponse for its status.
+	 */
+	override fn TryRead32(address: uint) bool
+	{
+		var elapsed: uint = 0
+		var successful: bool = false
+
+		state Start {
+			this.lastReadValue = 0
+			this.lastResponse = RESPONSE_OKAY
+			this.lastTimedOut = false
+			elapsed = 0
+			successful = false
+			this.araddr = address as Logic[32]
+			this.arprot = 0b000
+			this.arvalid = 0b1
+			this.rready = 0b0
+			goto Address
+		}
+
+		state Address {
+			if (this.arready == 0b1) {
+				this.arvalid = 0b0
+				this.rready = 0b1
+				elapsed = 0
+				goto Data
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Address
+			}
+		}
+
+		state Data {
+			if (this.rvalid == 0b1) {
+				this.lastReadValue = this.rdata as uint
+				this.lastResponse = this.rresp
+				goto Complete
+			}
+			elif (elapsed >= this.timeoutTicks) {
+				goto Timeout
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Data
+			}
+		}
+
+		state Complete {
+			this.arvalid = 0b0
+			this.rready = 0b0
+			this.lastTimedOut = false
+			successful = true
+			goto Finish
+		}
+
+		state Timeout {
+			this.arvalid = 0b0
+			this.rready = 0b0
+			this.lastTimedOut = true
+			successful = false
+			goto Finish
+		}
+
+		state Finish {}
+		return successful
+	}
+
+}
