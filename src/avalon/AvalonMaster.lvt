@@ -36,6 +36,7 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 
 	/**
 	 * Sets the maximum ticks to wait for waitrequest to be deasserted.
+	 * The count is exact; zero times out on the first stalled evaluation.
 	 */
 	override fn SetTimeoutTicks(timeoutTicks: uint)
 	{
@@ -47,7 +48,7 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 	 */
 	override fn GetTimeoutTicks() uint
 	{
-		return this.timeoutTicks
+		return timeoutTicks
 	}
 
 	/**
@@ -55,15 +56,15 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 	 */
 	override fn LastReadValue() uint
 	{
-		return this.lastReadValue
+		return lastReadValue
 	}
 
 	/**
 	 * Returns the Avalon response captured for the most recent accepted request.
 	 */
-	public fn LastResponse() Logic[2]
+	override fn LastResponse() Logic[2]
 	{
-		return this.lastResponse
+		return lastResponse
 	}
 
 	/**
@@ -71,12 +72,13 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 	 */
 	override fn LastTimedOut() bool
 	{
-		return this.lastTimedOut
+		return lastTimedOut
 	}
 
 	/**
 	 * Performs one non-pipelined Avalon-MM write using the selected byte lanes.
 	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 * After a timeout, the call holds the request until acceptance before returning.
 	 */
 	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
 	{
@@ -84,8 +86,8 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 		var successful: bool = false
 
 		state Start {
-			this.lastResponse = RESPONSE_OKAY
-			this.lastTimedOut = false
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.address = address as Logic[32]
@@ -98,18 +100,27 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 
 		state Transfer {
 			if (this.waitrequest == 0b0) {
-				this.lastResponse = this.response
+				lastResponse = this.response
 				successful = true
 				goto Finish
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				this.lastTimedOut = true
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
 				successful = false
-				goto Finish
+				goto RecoverWrite
 			}
 			else {
 				elapsed = elapsed + 1
 				goto Transfer
+			}
+		}
+
+		state RecoverWrite {
+			if (this.waitrequest == 0b0) {
+				goto Finish
+			}
+			else {
+				goto RecoverWrite
 			}
 		}
 
@@ -123,6 +134,7 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 	/**
 	 * Performs one non-pipelined Avalon-MM read and stores the accepted read data.
 	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 * After a timeout, the call holds the request until acceptance before returning.
 	 */
 	override fn TryRead32(address: uint) bool
 	{
@@ -130,9 +142,9 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 		var successful: bool = false
 
 		state Start {
-			this.lastReadValue = 0
-			this.lastResponse = RESPONSE_OKAY
-			this.lastTimedOut = false
+			lastReadValue = 0
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.address = address as Logic[32]
@@ -144,19 +156,28 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 
 		state Transfer {
 			if (this.waitrequest == 0b0) {
-				this.lastReadValue = this.readdata as uint
-				this.lastResponse = this.response
+				lastReadValue = this.readdata as uint
+				lastResponse = this.response
 				successful = true
 				goto Finish
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				this.lastTimedOut = true
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
 				successful = false
-				goto Finish
+				goto RecoverRead
 			}
 			else {
 				elapsed = elapsed + 1
 				goto Transfer
+			}
+		}
+
+		state RecoverRead {
+			if (this.waitrequest == 0b0) {
+				goto Finish
+			}
+			else {
+				goto RecoverRead
 			}
 		}
 

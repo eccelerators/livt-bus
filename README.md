@@ -1,11 +1,11 @@
 # Livt.Bus
 
 `Livt.Bus` provides reusable 32-bit memory-mapped bus masters, signal
-contracts, and verification components for Livt designs. Applications can use
-the masters as normal components, while tests can drive the same bus contracts
-through source-level function calls.
+contracts, protocol bridges, and verification components for Livt designs.
+Applications can use the masters and bridges as normal components, while tests
+can drive the same bus contracts through source-level function calls.
 
-The 0.2.0 package supports three commonly used register buses:
+The 0.3.0 package supports three commonly used register buses:
 
 - `Livt.Bus.Axi4Lite.Axi4LiteMaster`: reusable AXI4-Lite transaction master.
 - `Livt.Bus.Avalon.AvalonMaster`: reusable non-pipelined Avalon-MM master.
@@ -18,12 +18,14 @@ The 0.2.0 package supports three commonly used register buses:
   operations.
 - Configurable AXI4-Lite, Avalon, and Wishbone target models in each protocol's
   `Testing` namespace.
+- Six direct bridges covering every direction between AXI4-Lite, Avalon-MM,
+  and Wishbone Classic.
 
 ## 📦 Package
 
 ```toml
 [dependencies]
-Livt.Bus = "0.2.0"
+Livt.Bus = "0.3.0"
 ```
 
 `Livt.Bus` is part of the official Livt base-library package set. Depend on it
@@ -35,7 +37,7 @@ to initiate memory-mapped transactions.
 | API | Namespace | Purpose |
 |---|---|---|
 | `IMemoryMappedMaster32` | `Livt.Bus` | Common timeout, read, and write transaction API |
-| `IMemoryMappedBus32` | `Livt.Bus` | Compatibility test API with read/write/verify helpers |
+| `IMemoryMappedBus32` | `Livt.Bus` | Extended test API with non-asserting and read/write/verify helpers |
 | `Axi4LiteMaster` | `Livt.Bus.Axi4Lite` | AXI4-Lite transaction engine |
 | `AvalonMaster` | `Livt.Bus.Avalon` | Non-pipelined Avalon-MM transaction engine |
 | `WishboneMaster` | `Livt.Bus.Wishbone` | Wishbone Classic single-transfer engine |
@@ -43,6 +45,28 @@ to initiate memory-mapped transactions.
 | `AvalonTestMaster` | `Livt.Bus.Avalon.Testing` | Assertion-oriented Avalon-MM verification API |
 | `WishboneTestMaster` | `Livt.Bus.Wishbone.Testing` | Assertion-oriented Wishbone verification API |
 | `*TestSlave` | Protocol `Testing` namespace | Configurable 16-word target model |
+| `*To*Bridge32` | `Livt.Bus.Bridges` | Single-outstanding protocol conversion |
+
+## 🔀 Protocol Bridges
+
+Every directed pairing among the three supported buses is available:
+
+| Upstream | Downstream | Component |
+|---|---|---|
+| AXI4-Lite | Avalon-MM | `Axi4LiteToAvalonBridge32` |
+| AXI4-Lite | Wishbone | `Axi4LiteToWishboneBridge32` |
+| Avalon-MM | AXI4-Lite | `AvalonToAxi4LiteBridge32` |
+| Avalon-MM | Wishbone | `AvalonToWishboneBridge32` |
+| Wishbone | AXI4-Lite | `WishboneToAxi4LiteBridge32` |
+| Wishbone | Avalon-MM | `WishboneToAvalonBridge32` |
+
+Bridges are same-clock, 32-bit, byte-addressed, and single-outstanding. They
+preserve byte enables and apply a configurable timeout to downstream stalls.
+Timed-out AXI4-Lite and Avalon requests are drained before another request is
+accepted, so late responses cannot cross transaction boundaries.
+They do not perform clock-domain crossing, width conversion, bursts, or
+pipelining. See [`docs/bridges.md`](docs/bridges.md) for response semantics and
+wiring examples.
 
 ## 🔌 Common Transaction API
 
@@ -51,32 +75,33 @@ All reusable masters implement `IMemoryMappedMaster32`:
 - `TryWrite32(address, value, byteEnable)`
 - `TryRead32(address)`
 - `LastReadValue()`
+- `LastResponse()`
 - `SetTimeoutTicks(timeoutTicks)` and `GetTimeoutTicks()`
 - `LastTimedOut()`
 
 Transactions are non-asserting. A return value of `true` means the protocol
-completed its handshake. AXI4-Lite and Avalon expose `LastResponse()` as an
-additional protocol status. The Wishbone contract in this release is the
-ACK-based Classic subset and therefore reports completion and timeout only.
+completed its handshake; inspect `LastResponse()` to determine the normalized
+transaction status. AXI4-Lite and Avalon preserve their native response.
+Wishbone maps `ack` to `OKAY` and a local timeout to `SLVERR`.
 
 ```livt
 using Livt.Bus.Axi4Lite
 
 component RegisterWriter
 {
-    master: Axi4LiteMaster
+	master: Axi4LiteMaster
 	registers: RegisterBlock
 
-    new()
-    {
-        this.master = new Axi4LiteMaster()
+	new()
+	{
+		this.master = new Axi4LiteMaster()
 		this.registers = new RegisterBlock(this.master)
-    }
+	}
 
-    public fn WriteControl(value: uint) bool
-    {
-        return this.master.TryWrite32(0x04 as uint, value, 0b1111)
-    }
+	public fn WriteControl(value: uint) bool
+	{
+		return master.TryWrite32(0x04 as uint, value, 0b1111)
+	}
 }
 ```
 
@@ -103,8 +128,8 @@ helpers:
 using Livt.Bus.Axi4Lite.Testing
 
 this.master = new Axi4LiteTestMaster()
-this.master.Write32(0x04 as uint, 0x12345678 as uint)
-this.master.Verify32(0x04 as uint, 0x12345678 as uint)
+master.Write32(0x04 as uint, 0x12345678 as uint)
+master.Verify32(0x04 as uint, 0x12345678 as uint)
 ```
 
 Reusable components should use `Axi4LiteMaster`, `AvalonMaster`, or
@@ -118,11 +143,12 @@ Each master derives its default timeout from its component context:
 
 ```livt
 var timeoutTicks = this.context.TicksFor(10us)
-this.master.SetTimeoutTicks(timeoutTicks)
+master.SetTimeoutTicks(timeoutTicks)
 ```
 
 Assigning the master to another context automatically gives duration-based
-timeouts the correct tick count for that context.
+timeouts the correct tick count for that context. Livt.Bus 0.3.0 requires the
+Livt v0.0.10 compiler or newer.
 
 ## 🧪 Build and Test
 
@@ -135,13 +161,13 @@ livt test
 To force clean regeneration without removing dependencies:
 
 ```bash
-rm -rf out .livt/src.json .livt/ghdl
+livt clean
 livt test
 ```
 
 The suite covers delayed handshakes, independent AXI write channels, masked
 writes, read-back, response propagation, repeated transactions, idle cleanup,
-and timeout behavior across all three protocols.
+timeout behavior, and all six bridge directions.
 
 Short examples live in [`docs/usage.md`](docs/usage.md). Supported protocol
 profiles and integration constraints are documented in
@@ -159,9 +185,9 @@ profiles and integration constraints are documented in
 
 ## 🚧 Outlook
 
-Future additions may include APB, optional Wishbone error/retry signaling,
-pipelined Avalon reads, configurable widths, and reusable register-bank
-components.
+Future additions may include APB, a Wishbone profile with error/retry
+signaling, pipelined Avalon reads, clock-domain and width conversion, and
+reusable register-bank components.
 
 ## 📄 License
 

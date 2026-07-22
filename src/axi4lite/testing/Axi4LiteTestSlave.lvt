@@ -70,7 +70,7 @@ component Axi4LiteTestSlave
 	{
 		var index: int = 0
 		while (index < 16) {
-			this.registers[index] = 0
+			registers[index] = 0
 			index = index + 1
 		}
 	}
@@ -118,32 +118,36 @@ component Axi4LiteTestSlave
 
 		state WriteTransfer {
 			if (addressAccepted == false) {
-				if (awTicks >= this.awDelay) {
-					this.bus.awready = 0b1
-					if (this.bus.awvalid == 0b1) {
+				if (awTicks >= awDelay) {
+					if (this.bus.awready == 0b1 && this.bus.awvalid == 0b1) {
 						capturedWriteAddress = this.bus.awaddr as uint
 						addressAccepted = true
+						this.bus.awready = 0b0
+					}
+					else {
+						this.bus.awready = 0b1
 					}
 				}
 				else {
 					awTicks = awTicks + 1
 				}
 			}
-
 			if (dataAccepted == false) {
-				if (wTicks >= this.wDelay) {
-					this.bus.wready = 0b1
-					if (this.bus.wvalid == 0b1) {
+				if (wTicks >= wDelay) {
+					if (this.bus.wready == 0b1 && this.bus.wvalid == 0b1) {
 						capturedWriteData = this.bus.wdata as uint
 						capturedWriteStrobe = this.bus.wstrb
 						dataAccepted = true
+						this.bus.wready = 0b0
+					}
+					else {
+						this.bus.wready = 0b1
 					}
 				}
 				else {
 					wTicks = wTicks + 1
 				}
 			}
-
 			if (addressAccepted && dataAccepted) {
 				goto WriteApply
 			}
@@ -157,7 +161,7 @@ component Axi4LiteTestSlave
 			this.bus.wready = 0b0
 			registerIndex = (capturedWriteAddress >> 2) as int
 			if (registerIndex >= 0 && registerIndex < 16) {
-				nextValue = this.registers[registerIndex]
+				nextValue = registers[registerIndex]
 				if (capturedWriteStrobe[0] == 0b1) {
 					nextValue = (nextValue & (0xFFFFFF00 as uint)) | (capturedWriteData & (0x000000FF as uint))
 				}
@@ -170,15 +174,15 @@ component Axi4LiteTestSlave
 				if (capturedWriteStrobe[3] == 0b1) {
 					nextValue = (nextValue & (0x00FFFFFF as uint)) | (capturedWriteData & (0xFF000000 as uint))
 				}
-				this.registers[registerIndex] = nextValue
+				registers[registerIndex] = nextValue
 			}
 			bTicks = 0
 			goto WriteResponseDelay
 		}
 
 		state WriteResponseDelay {
-			if (bTicks >= this.bDelay) {
-				this.bus.bresp = this.configuredWriteResponse
+			if (bTicks >= bDelay) {
+				this.bus.bresp = configuredWriteResponse
 				this.bus.bvalid = 0b1
 				goto WriteResponse
 			}
@@ -199,7 +203,7 @@ component Axi4LiteTestSlave
 		}
 
 		state ReadAddress {
-			if (arTicks >= this.arDelay) {
+			if (arTicks >= arDelay) {
 				this.bus.arready = 0b1
 				if (this.bus.arvalid == 0b1) {
 					capturedReadAddress = this.bus.araddr as uint
@@ -218,15 +222,15 @@ component Axi4LiteTestSlave
 
 		state ReadDataDelay {
 			this.bus.arready = 0b0
-			if (rTicks >= this.rDelay) {
+			if (rTicks >= rDelay) {
 				registerIndex = (capturedReadAddress >> 2) as int
 				if (registerIndex >= 0 && registerIndex < 16) {
-					this.bus.rdata = this.registers[registerIndex] as Logic[32]
+					this.bus.rdata = registers[registerIndex] as Logic[32]
 				}
 				else {
 					this.bus.rdata = 0x00000000
 				}
-				this.bus.rresp = this.configuredReadResponse
+				this.bus.rresp = configuredReadResponse
 				this.bus.rvalid = 0b1
 				goto ReadData
 			}

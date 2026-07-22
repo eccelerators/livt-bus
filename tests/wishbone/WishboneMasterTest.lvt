@@ -18,30 +18,44 @@ component WishboneMasterTest
 	@Test
 	fn RunsDelayedAndMaskedTransactions()
 	{
-		this.slave.Clear()
+		slave.Clear()
 		var timeoutTicks = this.context.TicksFor(2us)
-		this.master.SetTimeoutTicks(timeoutTicks)
-		this.slave.ConfigureAckDelay(3 as uint)
+		master.SetTimeoutTicks(timeoutTicks)
+		slave.ConfigureAckDelay(3 as uint)
 
-		assert this.master.TryWrite32(0x0C as uint, 0x12345678 as uint, 0b1111)
-		assert this.master.TryWrite32(0x0C as uint, 0xAA00CC00 as uint, 0b1010)
-		assert this.master.TryRead32(0x0C as uint)
-		assert this.master.LastReadValue() == (0xAA34CC78 as uint)
-		assert this.master.LastTimedOut() == false
-		assert this.master.cyc == 0b0
-		assert this.master.stb == 0b0
-		assert this.master.we == 0b0
-		assert this.master.sel == 0b0000
+		assert master.TryWrite32(0x0C as uint, 0x12345678 as uint, 0b1111)
+		assert master.TryWrite32(0x0C as uint, 0xAA00CC00 as uint, 0b1010)
+		assert master.TryRead32(0x0C as uint)
+		assert master.LastReadValue() == (0xAA34CC78 as uint)
+		assert master.LastTimedOut() == false
+		assert master.cyc == 0b0
+		assert master.stb == 0b0
+		assert master.we == 0b0
+		assert master.sel == 0b0000
 	}
 
 	@Test
 	fn ReportsTimeout()
 	{
-		this.master.SetTimeoutTicks(2 as uint)
-		this.slave.ConfigureAckDelay(20 as uint)
-		assert this.master.TryWrite32(0x00 as uint, 0x55AA55AA as uint, 0b1111) == false
-		assert this.master.LastTimedOut()
-		assert this.master.cyc == 0b0
-		assert this.master.stb == 0b0
+		master.SetTimeoutTicks(2 as uint)
+		slave.ConfigureAckDelay(20 as uint)
+		assert master.TryWrite32(0x00 as uint, 0x55AA55AA as uint, 0b1111) == false
+		assert master.LastTimedOut()
+		assert master.LastResponse() == WishboneMaster.RESPONSE_SLVERR
+		assert master.cyc == 0b0
+		assert master.stb == 0b0
+
+		// The target observes cancellation and is immediately reusable.
+		slave.ConfigureAckDelay(0 as uint)
+		master.SetTimeoutTicks(10 as uint)
+		assert master.TryRead32(0x00 as uint)
+		assert master.LastReadValue() == (0x00000000 as uint)
+		assert master.LastResponse() == WishboneMaster.RESPONSE_OKAY
+
+		// The configured deadline deterministically distinguishes failure and success.
+		master.SetTimeoutTicks(2 as uint)
+		assert master.TryRead32(0x00 as uint) == false
+		master.SetTimeoutTicks(10 as uint)
+		assert master.TryRead32(0x00 as uint)
 	}
 }

@@ -8,12 +8,21 @@ using Livt.Bus
 component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 {
 	/**
+	 * Status returned after a Wishbone acknowledgement.
+	 */
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	/**
+	 * Status returned after a local Wishbone timeout.
+	 */
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
+	/**
 	 * Byte-select value enabling all four data lanes.
 	 */
 	public const ALL_BYTES: Logic[4] = 0b1111
 
 	timeoutTicks: uint
 	lastReadValue: uint
+	lastResponse: Logic[2]
 	lastTimedOut: bool
 
 	new()
@@ -26,11 +35,13 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 		this.cyc = 0b0
 		this.timeoutTicks = this.context.TicksFor(1ms)
 		this.lastReadValue = 0
+		this.lastResponse = RESPONSE_OKAY
 		this.lastTimedOut = false
 	}
 
 	/**
 	 * Sets the maximum ticks to wait for a Wishbone acknowledgement.
+	 * The count is exact; zero times out on the first stalled evaluation.
 	 */
 	override fn SetTimeoutTicks(timeoutTicks: uint)
 	{
@@ -42,7 +53,7 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 	 */
 	override fn GetTimeoutTicks() uint
 	{
-		return this.timeoutTicks
+		return timeoutTicks
 	}
 
 	/**
@@ -50,7 +61,15 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 	 */
 	override fn LastReadValue() uint
 	{
-		return this.lastReadValue
+		return lastReadValue
+	}
+
+	/**
+	 * Returns the normalized status of the most recent transfer.
+	 */
+	override fn LastResponse() Logic[2]
+	{
+		return lastResponse
 	}
 
 	/**
@@ -58,7 +77,7 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 	 */
 	override fn LastTimedOut() bool
 	{
-		return this.lastTimedOut
+		return lastTimedOut
 	}
 
 	/**
@@ -70,7 +89,8 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 		var successful: bool = false
 
 		state Start {
-			this.lastTimedOut = false
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.adr = address as Logic[32]
@@ -87,8 +107,9 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 				successful = true
 				goto Finish
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				this.lastTimedOut = true
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastResponse = RESPONSE_SLVERR
+				lastTimedOut = true
 				successful = false
 				goto Finish
 			}
@@ -116,8 +137,9 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 		var successful: bool = false
 
 		state Start {
-			this.lastReadValue = 0
-			this.lastTimedOut = false
+			lastReadValue = 0
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.adr = address as Logic[32]
@@ -130,12 +152,13 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 
 		state Transfer {
 			if (this.ack == 0b1) {
-				this.lastReadValue = this.datout as uint
+				lastReadValue = this.datout as uint
 				successful = true
 				goto Finish
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				this.lastTimedOut = true
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastResponse = RESPONSE_SLVERR
+				lastTimedOut = true
 				successful = false
 				goto Finish
 			}

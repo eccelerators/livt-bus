@@ -1,0 +1,193 @@
+namespace Livt.Bus.Bridges
+
+using Livt.Bus.Avalon
+using Livt.Bus.Wishbone
+
+/**
+ * Converts Wishbone Classic cycles into non-pipelined Avalon-MM transactions.
+ * The ACK-only Wishbone profile cannot carry Avalon error responses, so the
+ * most recent downstream status remains available through LastResponse().
+ */
+component WishboneToAvalonBridge32 : IAvalon32Master
+{
+	// Response recorded before a transaction or when Avalon completes normally.
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	// Response recorded when downstream Avalon acceptance times out.
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
+
+	// Wishbone source connected to the upstream side of this bridge.
+	upstream: IWishbone32Master
+	// Maximum ticks to wait while downstream Avalon holds waitrequest high.
+	timeoutTicks: uint
+	// Most recent Avalon response, or RESPONSE_SLVERR after a timeout.
+	lastResponse: Logic[2]
+	// True only when the most recent downstream transaction timed out.
+	lastTimedOut: bool
+	// True while a timed-out Avalon request remains asserted for acceptance.
+	recovering: bool
+
+	/**
+	 * Connects a Wishbone source and initializes the Avalon-MM master outputs.
+	 * The default Avalon acceptance timeout is 1 ms.
+	 */
+	new(upstream: flip IWishbone32Master)
+	{
+		this.upstream = upstream
+		this.upstream.datout = 0x00000000
+		this.upstream.ack = 0b0
+		this.address = 0x00000000
+		this.byteenable = 0b0000
+		this.write = 0b0
+		this.writedata = 0x00000000
+		this.read = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastResponse = RESPONSE_OKAY
+		this.lastTimedOut = false
+		this.recovering = false
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for downstream Avalon request acceptance.
+	 * The count is exact; zero times out on the first stalled evaluation.
+	 * On timeout the bridge withholds ack so the Wishbone source can time out.
+	 */
+	public fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for Avalon request acceptance.
+	 */
+	public fn GetTimeoutTicks() uint
+	{
+		return timeoutTicks
+	}
+
+	/**
+	 * Returns the most recent Avalon response.
+	 * A downstream timeout is reported as RESPONSE_SLVERR.
+	 */
+	public fn LastResponse() Logic[2]
+	{
+		return lastResponse
+	}
+
+	/**
+	 * Returns true when the most recent downstream Avalon request timed out.
+	 */
+	public fn LastTimedOut() bool
+	{
+		return lastTimedOut
+	}
+
+	/**
+	 * Returns true while the bridge completes a timed-out Avalon request.
+	 * New Wishbone cycles are ignored until recovery completes.
+	 */
+	public fn IsRecovering() bool
+	{
+		return recovering
+	}
+
+	/**
+	 * Converts each Wishbone cycle into one Avalon request and returns ack only
+	 * after downstream completion.
+	 */
+	process Run()
+	{
+		var elapsed: uint = 0
+		var downstreamAccepted: bool = false
+		var sourceReleased: bool = false
+
+		state Idle {
+			recovering = false
+			this.upstream.ack = 0b0
+			this.write = 0b0
+			this.read = 0b0
+			this.byteenable = 0b0000
+			if (this.upstream.cyc == 0b1 && this.upstream.stb == 0b1) {
+				lastResponse = RESPONSE_OKAY
+				lastTimedOut = false
+				this.address = this.upstream.adr
+				this.byteenable = this.upstream.sel
+				this.writedata = this.upstream.datin
+				elapsed = 0
+				if (this.upstream.we == 0b1) {
+					this.write = 0b1
+				}
+				else {
+					this.read = 0b1
+				}
+				goto Transfer
+			}
+			else {
+				goto Idle
+			}
+		}
+
+		state Transfer {
+			if (this.waitrequest == 0b0) {
+				lastResponse = this.response
+				if (this.upstream.we == 0b0) {
+					this.upstream.datout = this.readdata
+				}
+				this.write = 0b0
+				this.read = 0b0
+				this.byteenable = 0b0000
+				this.upstream.ack = 0b1
+				goto Acknowledge
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastResponse = RESPONSE_SLVERR
+				lastTimedOut = true
+				recovering = true
+				downstreamAccepted = false
+				sourceReleased = false
+				goto RecoverTransfer
+			}
+			else {
+				elapsed = elapsed + 1
+				goto Transfer
+			}
+		}
+
+		state Acknowledge {
+			if (this.upstream.cyc == 0b0 || this.upstream.stb == 0b0) {
+				this.upstream.ack = 0b0
+				goto Idle
+			}
+			else {
+				goto Acknowledge
+			}
+		}
+
+		state WaitForRelease {
+			if (this.upstream.cyc == 0b0 || this.upstream.stb == 0b0) {
+				goto Idle
+			}
+			else {
+				goto WaitForRelease
+			}
+		}
+
+		state RecoverTransfer {
+			if (downstreamAccepted == false && this.waitrequest == 0b0) {
+				this.write = 0b0
+				this.read = 0b0
+				this.byteenable = 0b0000
+				downstreamAccepted = true
+			}
+			if (this.upstream.cyc == 0b0 || this.upstream.stb == 0b0) {
+				sourceReleased = true
+			}
+			if (downstreamAccepted && sourceReleased) {
+				recovering = false
+				goto Idle
+			}
+			else {
+				goto RecoverTransfer
+			}
+		}
+	}
+}

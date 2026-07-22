@@ -38,6 +38,30 @@ Optional `ERR`, `RTY`, lock, tag, and burst signals are not part of this
 version. A transfer that never receives `ack` ends through the master's local
 timeout.
 
+## Bridge Profile
+
+The bridge components convert one transaction at a time in a single clock
+domain. Addresses remain 32-bit byte addresses and byte enables map bit for
+bit. AXI4-Lite write address and data may arrive independently; an AXI-source
+bridge captures both before issuing the downstream write.
+
+AXI4-Lite and Avalon two-bit responses map directly in either direction.
+Wishbone-source bridges acknowledge completed AXI4-Lite or Avalon transactions
+because the current Wishbone profile has no `ERR` output. Call
+`LastResponse()` to inspect the downstream response and `LastTimedOut()` to
+distinguish a timeout. On a downstream timeout no Wishbone `ack` is generated,
+allowing the upstream Wishbone master to apply its own timeout policy.
+
+AXI4-Lite- or Avalon-source bridges map a downstream Wishbone timeout to
+`SLVERR` (`0b10`). A normal Wishbone acknowledgement maps to `OKAY` (`0b00`).
+All bridges expose `LastTimedOut()`.
+
+AXI4-Lite and Avalon requests remain asserted after a local timeout until the
+downstream handshake and any response complete. Bridges targeting those
+protocols expose `IsRecovering()` and accept no new work while it is true. This
+quarantines late completions so they cannot satisfy a later transaction.
+Wishbone-target bridges abort a timed-out cycle by lowering `cyc` and `stb`.
+
 ## Byte Enables
 
 `TryWrite32` always receives a four-bit byte-enable value. Bit zero selects the
@@ -52,3 +76,12 @@ least-significant byte and bit three selects the most-significant byte.
 
 Use aligned addresses for full-word transactions. Narrow writes may use an
 aligned address with the appropriate data position and byte-enable pattern.
+
+## Master Timeout Recovery
+
+Wishbone masters abort a timed-out transfer by lowering `cyc` and `stb`.
+AXI4-Lite and Avalon cannot cancel an offered request. Their `TryWrite32()` and
+`TryRead32()` methods mark the transaction as timed out at the configured
+deadline, continue holding the required signals until the late transaction is
+safely drained, and then return `false`. A target that never completes can
+therefore keep the call blocked; reset is the only protocol-safe escape.

@@ -18,14 +18,18 @@ component Axi4LiteWriteResponseTimeoutTest
 	@Test
 	fn TimesOutWhileWaitingForWriteResponse()
 	{
-		this.master.SetTimeoutTicks(2 as uint)
-		this.slave.ConfigureDelays(0, 0, 20, 0, 0)
-		var completed = this.master.TryWrite32(0x00 as uint, 0x12345678 as uint, 0b1111)
+		master.SetTimeoutTicks(2 as uint)
+		slave.ConfigureDelays(0, 0, 20, 0, 0)
+		var completed = master.TryWrite32(0x00 as uint, 0x12345678 as uint, 0b1111)
 		assert completed == false
-		assert this.master.LastTimedOut()
-		assert this.master.awvalid == 0b0
-		assert this.master.wvalid == 0b0
-		assert this.master.bready == 0b0
+		assert master.LastTimedOut()
+		assert master.awvalid == 0b0
+		assert master.wvalid == 0b0
+		assert master.bready == 0b0
+		slave.ConfigureDelays(0, 0, 0, 0, 0)
+		master.SetTimeoutTicks(10 as uint)
+		assert master.TryRead32(0x00 as uint)
+		assert master.LastReadValue() == (0x12345678 as uint)
 	}
 }
 
@@ -37,20 +41,24 @@ component Axi4LiteReadAddressTimeoutTest
 
 	new()
 	{
-		this.master = new Axi4LiteTestMaster()
-		this.slave = new Axi4LiteTestSlave(this.master)
+		master = new Axi4LiteTestMaster()
+		slave = new Axi4LiteTestSlave(master)
 	}
 
 	@Test
 	fn TimesOutWhileWaitingForReadAddress()
 	{
-		this.master.SetTimeoutTicks(2 as uint)
-		this.slave.ConfigureDelays(0, 0, 0, 20, 0)
-		var completed = this.master.TryRead32(0x00 as uint)
+		master.SetTimeoutTicks(2 as uint)
+		slave.ConfigureDelays(0, 0, 0, 20, 0)
+		var completed = master.TryRead32(0x00 as uint)
 		assert completed == false
-		assert this.master.LastTimedOut()
-		assert this.master.arvalid == 0b0
-		assert this.master.rready == 0b0
+		assert master.LastTimedOut()
+		assert master.arvalid == 0b0
+		assert master.rready == 0b0
+		slave.ConfigureDelays(0, 0, 0, 0, 0)
+		master.SetTimeoutTicks(10 as uint)
+		assert master.TryRead32(0x00 as uint)
+		assert master.LastTimedOut() == false
 	}
 }
 
@@ -62,19 +70,23 @@ component Axi4LiteReadDataTimeoutTest
 
 	new()
 	{
-		this.master = new Axi4LiteTestMaster()
-		this.slave = new Axi4LiteTestSlave(this.master)
+		master = new Axi4LiteTestMaster()
+		slave = new Axi4LiteTestSlave(master)
 	}
 
 	@Test
 	fn TimesOutWhileWaitingForReadData()
 	{
-		this.master.SetTimeoutTicks(2 as uint)
-		this.slave.ConfigureDelays(0, 0, 0, 0, 20)
-		var completed = this.master.TryRead32(0x00 as uint)
+		master.SetTimeoutTicks(2 as uint)
+		slave.ConfigureDelays(0, 0, 0, 0, 20)
+		var completed = master.TryRead32(0x00 as uint)
 		assert completed == false
-		assert this.master.LastTimedOut()
-		assert this.master.arvalid == 0b0
-		assert this.master.rready == 0b0
+		assert master.LastTimedOut()
+		assert master.arvalid == 0b0
+		assert master.rready == 0b0
+		slave.ConfigureDelays(0, 0, 0, 0, 0)
+		master.SetTimeoutTicks(10 as uint)
+		assert master.TryRead32(0x00 as uint)
+		assert master.LastTimedOut() == false
 	}
 }

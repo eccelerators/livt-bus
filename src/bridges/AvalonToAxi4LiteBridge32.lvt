@@ -1,0 +1,295 @@
+namespace Livt.Bus.Bridges
+
+using Livt.Bus.Avalon
+using Livt.Bus.Axi4Lite
+
+/**
+ * Converts non-pipelined Avalon-MM transactions into AXI4-Lite transactions.
+ * The bridge supports one transaction at a time and preserves byte addresses,
+ * write byte enables, read data, and two-bit response values.
+ */
+component AvalonToAxi4LiteBridge32 : IAxi4Lite32Master
+{
+	// Response returned to Avalon when a downstream AXI handshake times out.
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
+
+	// Avalon-MM source connected to the upstream side of this bridge.
+	upstream: IAvalon32Master
+	// Maximum ticks to wait for each downstream AXI handshake stage.
+	timeoutTicks: uint
+	// True only when the most recent downstream transaction timed out.
+	lastTimedOut: bool
+	// True while a timed-out AXI transaction is being completed and discarded.
+	recovering: bool
+
+	/**
+	 * Connects an Avalon-MM source and initializes the AXI4-Lite master outputs.
+	 * The default timeout for each AXI handshake stage is 1 ms.
+	 */
+	new(upstream: flip IAvalon32Master)
+	{
+		this.upstream = upstream
+		this.upstream.readdata = 0x00000000
+		this.upstream.waitrequest = 0b1
+		this.upstream.response = 0b00
+		this.awaddr = 0x00000000
+		this.awprot = 0b000
+		this.awvalid = 0b0
+		this.wdata = 0x00000000
+		this.wstrb = 0b0000
+		this.wvalid = 0b0
+		this.bready = 0b0
+		this.araddr = 0x00000000
+		this.arprot = 0b000
+		this.arvalid = 0b0
+		this.rready = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastTimedOut = false
+		this.recovering = false
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for each downstream AXI handshake stage.
+	 * The count is exact; zero times out on the first stalled evaluation.
+	 * A timeout completes the Avalon request with RESPONSE_SLVERR.
+	 */
+	public fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for each downstream AXI handshake stage.
+	 */
+	public fn GetTimeoutTicks() uint
+	{
+		return timeoutTicks
+	}
+
+	/**
+	 * Returns true when the most recent downstream AXI transaction timed out.
+	 */
+	public fn LastTimedOut() bool
+	{
+		return lastTimedOut
+	}
+
+	/**
+	 * Returns true while the bridge drains a timed-out AXI transaction.
+	 * New Avalon requests remain stalled until recovery completes.
+	 */
+	public fn IsRecovering() bool
+	{
+		return recovering
+	}
+
+	/**
+	 * Captures Avalon requests and sequences the corresponding AXI channels.
+	 * Write address and data handshakes are tracked independently.
+	 */
+	process Run()
+	{
+		var addressAccepted: bool = false
+		var dataAccepted: bool = false
+		var elapsed: uint = 0
+
+		state Idle {
+			recovering = false
+			this.upstream.waitrequest = 0b1
+			this.awvalid = 0b0
+			this.wvalid = 0b0
+			this.bready = 0b0
+			this.arvalid = 0b0
+			this.rready = 0b0
+			if (this.upstream.write == 0b1) {
+				lastTimedOut = false
+				this.awaddr = this.upstream.address
+				this.awprot = 0b000
+				this.awvalid = 0b1
+				this.wdata = this.upstream.writedata
+				this.wstrb = this.upstream.byteenable
+				this.wvalid = 0b1
+				addressAccepted = false
+				dataAccepted = false
+				elapsed = 0
+				goto WriteTransfer
+			}
+			elif (this.upstream.read == 0b1) {
+				lastTimedOut = false
+				this.araddr = this.upstream.address
+				this.arprot = 0b000
+				this.arvalid = 0b1
+				elapsed = 0
+				goto ReadAddress
+			}
+			else {
+				goto Idle
+			}
+		}
+
+		state WriteTransfer {
+			if (this.awready == 0b1) {
+				addressAccepted = true
+				this.awvalid = 0b0
+			}
+			if (this.wready == 0b1) {
+				dataAccepted = true
+				this.wvalid = 0b0
+			}
+			if (addressAccepted && dataAccepted) {
+				this.bready = 0b1
+				elapsed = 0
+				goto WriteResponse
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				recovering = true
+				this.upstream.readdata = 0x00000000
+				this.upstream.response = RESPONSE_SLVERR
+				this.upstream.waitrequest = 0b0
+				goto RecoverWriteTransfer
+			}
+			else {
+				elapsed = elapsed + 1
+				goto WriteTransfer
+			}
+		}
+
+		state WriteResponse {
+			if (this.bvalid == 0b1) {
+				this.bready = 0b0
+				this.upstream.response = this.bresp
+				this.upstream.waitrequest = 0b0
+				goto Accepted
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				recovering = true
+				this.upstream.readdata = 0x00000000
+				this.upstream.response = RESPONSE_SLVERR
+				this.upstream.waitrequest = 0b0
+				goto RecoverWriteResponse
+			}
+			else {
+				elapsed = elapsed + 1
+				goto WriteResponse
+			}
+		}
+
+		state ReadAddress {
+			if (this.arready == 0b1) {
+				this.arvalid = 0b0
+				this.rready = 0b1
+				elapsed = 0
+				goto ReadData
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				recovering = true
+				this.upstream.readdata = 0x00000000
+				this.upstream.response = RESPONSE_SLVERR
+				this.upstream.waitrequest = 0b0
+				goto RecoverReadAddress
+			}
+			else {
+				elapsed = elapsed + 1
+				goto ReadAddress
+			}
+		}
+
+		state ReadData {
+			if (this.rvalid == 0b1) {
+				this.rready = 0b0
+				this.upstream.readdata = this.rdata
+				this.upstream.response = this.rresp
+				this.upstream.waitrequest = 0b0
+				goto Accepted
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				recovering = true
+				this.upstream.readdata = 0x00000000
+				this.upstream.response = RESPONSE_SLVERR
+				this.upstream.waitrequest = 0b0
+				goto RecoverReadData
+			}
+			else {
+				elapsed = elapsed + 1
+				goto ReadData
+			}
+		}
+
+		state RecoverWriteTransfer {
+			this.upstream.waitrequest = 0b1
+			if (this.awready == 0b1) {
+				addressAccepted = true
+				this.awvalid = 0b0
+			}
+			if (this.wready == 0b1) {
+				dataAccepted = true
+				this.wvalid = 0b0
+			}
+			if (addressAccepted && dataAccepted) {
+				this.bready = 0b1
+				goto RecoverWriteResponse
+			}
+			else {
+				goto RecoverWriteTransfer
+			}
+		}
+
+		state RecoverWriteResponse {
+			this.upstream.waitrequest = 0b1
+			if (this.bvalid == 0b1) {
+				this.bready = 0b0
+				goto Recovered
+			}
+			else {
+				goto RecoverWriteResponse
+			}
+		}
+
+		state RecoverReadAddress {
+			this.upstream.waitrequest = 0b1
+			if (this.arready == 0b1) {
+				this.arvalid = 0b0
+				this.rready = 0b1
+				goto RecoverReadData
+			}
+			else {
+				goto RecoverReadAddress
+			}
+		}
+
+		state RecoverReadData {
+			this.upstream.waitrequest = 0b1
+			if (this.rvalid == 0b1) {
+				this.rready = 0b0
+				goto Recovered
+			}
+			else {
+				goto RecoverReadData
+			}
+		}
+
+		state Recovered {
+			if (this.upstream.write == 0b0 && this.upstream.read == 0b0) {
+				recovering = false
+				goto Idle
+			}
+			else {
+				goto Recovered
+			}
+		}
+
+		state Accepted {
+			this.upstream.waitrequest = 0b1
+			if (this.upstream.write == 0b0 && this.upstream.read == 0b0) {
+				goto Idle
+			}
+			else {
+				goto Accepted
+			}
+		}
+	}
+}

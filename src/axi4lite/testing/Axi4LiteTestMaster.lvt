@@ -55,8 +55,9 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 
 	/**
 	 * Sets the timeout applied independently to each AXI handshake stage.
+	 * The count is exact; zero times out on the first stalled evaluation.
 	 */
-	public fn SetTimeoutTicks(timeoutTicks: uint)
+	override fn SetTimeoutTicks(timeoutTicks: uint)
 	{
 		this.timeoutTicks = timeoutTicks
 	}
@@ -64,40 +65,41 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	/**
 	 * Returns the timeout applied independently to each AXI handshake stage.
 	 */
-	public fn GetTimeoutTicks() uint
+	override fn GetTimeoutTicks() uint
 	{
-		return this.timeoutTicks
+		return timeoutTicks
 	}
 
 	/**
 	 * Returns the data captured by the most recently completed read.
 	 */
-	public fn LastReadValue() uint
+	override fn LastReadValue() uint
 	{
-		return this.lastReadValue
+		return lastReadValue
 	}
 
 	/**
 	 * Returns the AXI response captured by the most recently completed transaction.
 	 */
-	public fn LastResponse() Logic[2]
+	override fn LastResponse() Logic[2]
 	{
-		return this.lastResponse
+		return lastResponse
 	}
 
 	/**
 	 * Returns true when the most recent transaction timed out.
 	 */
-	public fn LastTimedOut() bool
+	override fn LastTimedOut() bool
 	{
-		return this.lastTimedOut
+		return lastTimedOut
 	}
 
 	/**
 	 * Performs a non-asserting AXI4-Lite write using the selected byte lanes.
 	 * Returns true after a response handshake; inspect LastResponse for its status.
+	 * After a timeout, the call drains the outstanding transaction before returning.
 	 */
-	public fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	private fn ExecuteWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
 	{
 		var addressAccepted: bool = false
 		var dataAccepted: bool = false
@@ -105,8 +107,8 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var successful: bool = false
 
 		state Start {
-			this.lastResponse = RESPONSE_OKAY
-			this.lastTimedOut = false
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			addressAccepted = false
 			dataAccepted = false
 			elapsed = 0
@@ -136,8 +138,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 				elapsed = 0
 				goto Response
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverWriteTransfer
 			}
 			else {
 				elapsed = elapsed + 1
@@ -147,11 +151,13 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 
 		state Response {
 			if (this.bvalid == 0b1) {
-				this.lastResponse = this.bresp
+				lastResponse = this.bresp
 				goto Complete
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverWriteResponse
 			}
 			else {
 				elapsed = elapsed + 1
@@ -163,18 +169,37 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 			this.awvalid = 0b0
 			this.wvalid = 0b0
 			this.bready = 0b0
-			this.lastTimedOut = false
+			lastTimedOut = false
 			successful = true
 			goto Finish
 		}
 
-		state Timeout {
-			this.awvalid = 0b0
-			this.wvalid = 0b0
-			this.bready = 0b0
-			this.lastTimedOut = true
-			successful = false
-			goto Finish
+		state RecoverWriteTransfer {
+			if (this.awready == 0b1) {
+				addressAccepted = true
+				this.awvalid = 0b0
+			}
+			if (this.wready == 0b1) {
+				dataAccepted = true
+				this.wvalid = 0b0
+			}
+			if (addressAccepted && dataAccepted) {
+				this.bready = 0b1
+				goto RecoverWriteResponse
+			}
+			else {
+				goto RecoverWriteTransfer
+			}
+		}
+
+		state RecoverWriteResponse {
+			if (this.bvalid == 0b1) {
+				this.bready = 0b0
+				goto Finish
+			}
+			else {
+				goto RecoverWriteResponse
+			}
 		}
 
 		state Finish {}
@@ -184,16 +209,17 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	/**
 	 * Performs a non-asserting AXI4-Lite read and stores the returned data.
 	 * Returns true after a data handshake; inspect LastResponse for its status.
+	 * After a timeout, the call drains the outstanding transaction before returning.
 	 */
-	public fn TryRead32(address: uint) bool
+	private fn ExecuteRead32(address: uint) bool
 	{
 		var elapsed: uint = 0
 		var successful: bool = false
 
 		state Start {
-			this.lastReadValue = 0
-			this.lastResponse = RESPONSE_OKAY
-			this.lastTimedOut = false
+			lastReadValue = 0
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.araddr = address as Logic[32]
@@ -210,8 +236,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 				elapsed = 0
 				goto Data
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverReadAddress
 			}
 			else {
 				elapsed = elapsed + 1
@@ -221,12 +249,14 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 
 		state Data {
 			if (this.rvalid == 0b1) {
-				this.lastReadValue = this.rdata as uint
-				this.lastResponse = this.rresp
+				lastReadValue = this.rdata as uint
+				lastResponse = this.rresp
 				goto Complete
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverReadData
 			}
 			else {
 				elapsed = elapsed + 1
@@ -237,20 +267,53 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		state Complete {
 			this.arvalid = 0b0
 			this.rready = 0b0
-			this.lastTimedOut = false
+			lastTimedOut = false
 			successful = true
 			goto Finish
 		}
 
-		state Timeout {
-			this.arvalid = 0b0
-			this.rready = 0b0
-			this.lastTimedOut = true
-			successful = false
-			goto Finish
+		state RecoverReadAddress {
+			if (this.arready == 0b1) {
+				this.arvalid = 0b0
+				this.rready = 0b1
+				goto RecoverReadData
+			}
+			else {
+				goto RecoverReadAddress
+			}
+		}
+
+		state RecoverReadData {
+			if (this.rvalid == 0b1) {
+				this.rready = 0b0
+				goto Finish
+			}
+			else {
+				goto RecoverReadData
+			}
 		}
 
 		state Finish {}
+		return successful
+	}
+
+	/**
+	 * Provides the non-asserting write operation inherited by the common API.
+	 */
+	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var successful = this.ExecuteWrite32(address, value, byteEnable)
+		state Settle {}
+		return successful
+	}
+
+	/**
+	 * Provides the non-asserting read operation inherited by the common API.
+	 */
+	override fn TryRead32(address: uint) bool
+	{
+		var successful = this.ExecuteRead32(address)
+		state Settle {}
 		return successful
 	}
 
@@ -273,9 +336,9 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		elif (lane == 3) {
 			byteEnable = 0b1000
 		}
-		var completed = this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
+		assert lastResponse == RESPONSE_OKAY
 	}
 
 	/**
@@ -292,9 +355,9 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		if (lane == 2) {
 			byteEnable = 0b1100
 		}
-		var completed = this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
+		assert lastResponse == RESPONSE_OKAY
 	}
 
 	/**
@@ -302,9 +365,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	 */
 	override fn Write32(address: uint, value: uint)
 	{
-		var completed = this.TryWrite32(address, value, ALL_BYTES)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteWrite32(address, value, ALL_BYTES)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
+		assert lastResponse == RESPONSE_OKAY
 	}
 
 	/**
@@ -312,9 +376,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	 */
 	override fn WriteMasked32(address: uint, value: uint, byteEnable: Logic[4])
 	{
-		var completed = this.TryWrite32(address, value, byteEnable)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteWrite32(address, value, byteEnable)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
+		assert lastResponse == RESPONSE_OKAY
 	}
 
 	/**
@@ -325,10 +390,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var lane = (address & (3 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		var completed = this.TryRead32(alignedAddress)
+		var completed = this.ExecuteRead32(alignedAddress)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
-		return (this.lastReadValue >> shift) as byte
+		assert lastResponse == RESPONSE_OKAY
+		return (lastReadValue >> shift) as byte
 	}
 
 	/**
@@ -340,10 +405,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var lane = (address & (2 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		var completed = this.TryRead32(alignedAddress)
+		var completed = this.ExecuteRead32(alignedAddress)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
-		return (this.lastReadValue >> shift) as Logic[16]
+		assert lastResponse == RESPONSE_OKAY
+		return (lastReadValue >> shift) as Logic[16]
 	}
 
 	/**
@@ -351,10 +416,11 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	 */
 	override fn Read32(address: uint) uint
 	{
-		var completed = this.TryRead32(address)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteRead32(address)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
-		return this.lastReadValue
+		assert lastResponse == RESPONSE_OKAY
+		return lastReadValue
 	}
 
 	/**
@@ -365,10 +431,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var lane = (address & (3 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		var completed = this.TryRead32(alignedAddress)
+		var completed = this.ExecuteRead32(alignedAddress)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
-		assert ((this.lastReadValue >> shift) as byte) == expected
+		assert lastResponse == RESPONSE_OKAY
+		assert ((lastReadValue >> shift) as byte) == expected
 	}
 
 	/**
@@ -380,10 +446,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var lane = (address & (2 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		var completed = this.TryRead32(alignedAddress)
+		var completed = this.ExecuteRead32(alignedAddress)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
-		assert ((this.lastReadValue >> shift) as Logic[16]) == expected
+		assert lastResponse == RESPONSE_OKAY
+		assert ((lastReadValue >> shift) as Logic[16]) == expected
 	}
 
 	/**
@@ -391,10 +457,11 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	 */
 	override fn Verify32(address: uint, expected: uint)
 	{
-		var completed = this.TryRead32(address)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteRead32(address)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
-		assert this.lastReadValue == expected
+		assert lastResponse == RESPONSE_OKAY
+		assert lastReadValue == expected
 	}
 
 	/**
@@ -402,9 +469,10 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	 */
 	override fn VerifyMasked32(address: uint, expected: uint, mask: uint)
 	{
-		var completed = this.TryRead32(address)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteRead32(address)
 		assert completed
-		assert this.lastResponse == RESPONSE_OKAY
-		assert (this.lastReadValue & mask) == (expected & mask)
+		assert lastResponse == RESPONSE_OKAY
+		assert (lastReadValue & mask) == (expected & mask)
 	}
 }

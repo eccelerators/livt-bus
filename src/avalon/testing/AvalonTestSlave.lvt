@@ -40,7 +40,7 @@ component AvalonTestSlave
 	{
 		var index: int = 0
 		while (index < 16) {
-			this.registers[index] = 0
+			registers[index] = 0
 			index = index + 1
 		}
 	}
@@ -63,10 +63,10 @@ component AvalonTestSlave
 		}
 
 		state WaitForAcceptance {
-			if (elapsed >= this.requestDelay) {
+			if (elapsed >= requestDelay) {
 				registerIndex = ((this.bus.address as uint) >> 2) as int
 				if (this.bus.write == 0b1 && registerIndex >= 0 && registerIndex < 16) {
-					nextValue = this.registers[registerIndex]
+					nextValue = registers[registerIndex]
 					if (this.bus.byteenable[0] == 0b1) {
 						nextValue = (nextValue & (0xFFFFFF00 as uint)) | ((this.bus.writedata as uint) & (0x000000FF as uint))
 					}
@@ -79,17 +79,17 @@ component AvalonTestSlave
 					if (this.bus.byteenable[3] == 0b1) {
 						nextValue = (nextValue & (0x00FFFFFF as uint)) | ((this.bus.writedata as uint) & (0xFF000000 as uint))
 					}
-					this.registers[registerIndex] = nextValue
+					registers[registerIndex] = nextValue
 				}
 				if (this.bus.read == 0b1) {
 					if (registerIndex >= 0 && registerIndex < 16) {
-						this.bus.readdata = this.registers[registerIndex] as Logic[32]
+						this.bus.readdata = registers[registerIndex] as Logic[32]
 					}
 					else {
 						this.bus.readdata = 0x00000000
 					}
 				}
-				this.bus.response = this.configuredResponse
+				this.bus.response = configuredResponse
 				this.bus.waitrequest = 0b0
 				goto Accepted
 			}

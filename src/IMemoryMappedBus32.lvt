@@ -3,7 +3,7 @@ namespace Livt.Bus
 /**
  * Transaction-level access to a 32-bit, byte-addressed memory-mapped bus.
  */
-interface IMemoryMappedBus32
+interface IMemoryMappedBus32 : IMemoryMappedMaster32
 {
 	/**
 	 * Writes one byte to the selected byte address and asserts successful completion.
@@ -16,12 +16,12 @@ interface IMemoryMappedBus32
 	fn Write16(address: uint, value: Logic[16])
 
 	/**
-	 * Writes one 32-bit word and asserts successful completion.
+	 * Writes one aligned 32-bit word and asserts successful completion.
 	 */
 	fn Write32(address: uint, value: uint)
 
 	/**
-	 * Writes selected byte lanes of a 32-bit word and asserts successful completion.
+	 * Writes selected byte lanes of an aligned word and asserts successful completion.
 	 */
 	fn WriteMasked32(address: uint, value: uint, byteEnable: Logic[4])
 
@@ -36,7 +36,7 @@ interface IMemoryMappedBus32
 	fn Read16(address: uint) Logic[16]
 
 	/**
-	 * Reads and returns one 32-bit word.
+	 * Reads and returns one aligned 32-bit word.
 	 */
 	fn Read32(address: uint) uint
 
@@ -51,12 +51,12 @@ interface IMemoryMappedBus32
 	fn Verify16(address: uint, expected: Logic[16])
 
 	/**
-	 * Reads one word and asserts that it equals the expected value.
+	 * Reads one aligned word and asserts that it equals the expected value.
 	 */
 	fn Verify32(address: uint, expected: uint)
 
 	/**
-	 * Reads one word and compares only the bits selected by the mask.
+	 * Reads one aligned word and compares only the bits selected by the mask.
 	 */
 	fn VerifyMasked32(address: uint, expected: uint, mask: uint)
 }

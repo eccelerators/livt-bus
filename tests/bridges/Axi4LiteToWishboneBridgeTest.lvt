@@ -1,0 +1,71 @@
+namespace Livt.Bus.Tests.Bridges
+
+using Livt.Bus.Axi4Lite.Testing
+using Livt.Bus.Bridges
+using Livt.Bus.Wishbone.Testing
+
+/**
+ * Verifies AXI4-Lite transactions converted to Wishbone Classic.
+ */
+@Test
+component Axi4LiteToWishboneBridgeTest
+{
+	// AXI4-Lite transaction source under test.
+	upstream: Axi4LiteTestMaster
+	// Bridge subject under test.
+	bridge: Axi4LiteToWishboneBridge32
+	// Configurable Wishbone target.
+	target: WishboneTestSlave
+
+	/**
+	 * Connects the AXI4-Lite source, bridge, and Wishbone target.
+	 */
+	new()
+	{
+		this.upstream = new Axi4LiteTestMaster()
+		this.bridge = new Axi4LiteToWishboneBridge32(this.upstream)
+		this.target = new WishboneTestSlave(this.bridge)
+	}
+
+	/**
+	 * Verifies delayed acknowledgement, masked writes, reads, and timeout mapping.
+	 */
+	@Test
+	fn ForwardsReadsAndMaskedWrites()
+	{
+		target.Clear()
+		target.ConfigureAckDelay(2 as uint)
+		var downstreamTimeout = this.context.TicksFor(10us)
+		var upstreamTimeout = this.context.TicksFor(20us)
+		bridge.SetTimeoutTicks(downstreamTimeout)
+		upstream.SetTimeoutTicks(upstreamTimeout)
+		assert bridge.GetTimeoutTicks() == downstreamTimeout
+
+		assert upstream.TryWrite32(0x04 as uint, 0x12345678 as uint, 0b1111) == true
+		assert upstream.LastResponse() == 0b00
+		assert upstream.TryWrite32(0x04 as uint, 0xAA00CC00 as uint, 0b1010) == true
+		assert upstream.TryRead32(0x04 as uint) == true
+		assert upstream.LastReadValue() == (0xAA34CC78 as uint)
+		assert upstream.LastResponse() == 0b00
+
+		bridge.SetTimeoutTicks(3 as uint)
+		upstream.SetTimeoutTicks(10 as uint)
+
+		target.ConfigureAckDelay(12 as uint)
+		assert upstream.TryWrite32(0x10 as uint, 0x55667788 as uint, 0b1111) == true
+		assert upstream.LastResponse() == Axi4LiteToWishboneBridge32.RESPONSE_SLVERR
+		assert bridge.LastTimedOut() == true
+		Simulation.Wait(20)
+
+		assert upstream.TryRead32(0x04 as uint) == true
+		assert upstream.LastResponse() == Axi4LiteToWishboneBridge32.RESPONSE_SLVERR
+		assert bridge.LastTimedOut() == true
+		Simulation.Wait(20)
+
+		target.ConfigureAckDelay(0 as uint)
+		bridge.SetTimeoutTicks(10 as uint)
+		assert upstream.TryRead32(0x04 as uint) == true
+		assert upstream.LastReadValue() == (0xAA34CC78 as uint)
+		assert bridge.LastTimedOut() == false
+	}
+}

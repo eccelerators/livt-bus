@@ -1,6 +1,6 @@
 [project]
 name = "Livt.Bus"
-version = "0.2.0"
+version = "0.3.0"
 path = "src"
 outdir = "out"
 
@@ -15,7 +15,13 @@ components = [
     "AvalonMasterTest",
     "AvalonTestMasterTest",
     "WishboneMasterTest",
-    "WishboneTestMasterTest"
+    "WishboneTestMasterTest",
+    "Axi4LiteToWishboneBridgeTest",
+    "Axi4LiteToAvalonBridgeTest",
+    "AvalonToAxi4LiteBridgeTest",
+    "AvalonToWishboneBridgeTest",
+    "WishboneToAxi4LiteBridgeTest",
+    "WishboneToAvalonBridgeTest"
 ]
 
 [build.debug]

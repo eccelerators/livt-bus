@@ -18,13 +18,15 @@ interface IMemoryMappedMaster32
 	/**
 	 * Starts a 32-bit write at a byte address using one enable bit per byte lane.
 	 * Returns true when the protocol handshake completes, even if a protocol-specific
-	 * response reports an error. Returns false after a timeout.
+	 * response reports an error. Returns false after a timeout and any required
+	 * protocol-safe recovery completes.
 	 */
 	fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
 
 	/**
 	 * Starts a 32-bit read at a byte address.
-	 * Returns true when the protocol handshake completes and false after a timeout.
+	 * Returns true when the protocol handshake completes. Returns false after a
+	 * timeout and any required protocol-safe recovery completes.
 	 */
 	fn TryRead32(address: uint) bool
 
@@ -32,6 +34,13 @@ interface IMemoryMappedMaster32
 	 * Returns the value captured by the most recently completed read.
 	 */
 	fn LastReadValue() uint
+
+	/**
+	 * Returns the two-bit status of the most recent transaction.
+	 * AXI4-Lite and Avalon return their native response. Wishbone maps an
+	 * acknowledgement to OKAY (0b00) and a local timeout to SLVERR (0b10).
+	 */
+	fn LastResponse() Logic[2]
 
 	/**
 	 * Returns true when the most recent transaction ended because of its timeout.

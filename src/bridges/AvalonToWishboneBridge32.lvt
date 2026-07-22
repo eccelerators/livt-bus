@@ -1,0 +1,168 @@
+namespace Livt.Bus.Bridges
+
+using Livt.Bus.Avalon
+using Livt.Bus.Wishbone
+
+/**
+ * Converts non-pipelined Avalon-MM transactions into Wishbone Classic cycles.
+ * The bridge supports one transaction at a time and preserves byte addresses
+ * and write byte enables.
+ */
+component AvalonToWishboneBridge32 : IWishbone32Master
+{
+	// Response returned to Avalon after a normal Wishbone acknowledgement.
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	// Response returned to Avalon when Wishbone acknowledgement times out.
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
+
+	// Avalon-MM source connected to the upstream side of this bridge.
+	upstream: IAvalon32Master
+	// Maximum ticks to wait for downstream Wishbone acknowledgement.
+	timeoutTicks: uint
+	// True only when the most recent downstream cycle timed out.
+	lastTimedOut: bool
+
+	/**
+	 * Connects an Avalon-MM source and initializes the Wishbone master outputs.
+	 * The default acknowledgement timeout is 1 ms.
+	 */
+	new(upstream: flip IAvalon32Master)
+	{
+		this.upstream = upstream
+		this.upstream.readdata = 0x00000000
+		this.upstream.waitrequest = 0b1
+		this.upstream.response = RESPONSE_OKAY
+		this.adr = 0x00000000
+		this.sel = 0b0000
+		this.we = 0b0
+		this.stb = 0b0
+		this.datin = 0x00000000
+		this.cyc = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastTimedOut = false
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for downstream Wishbone acknowledgement.
+	 * The count is exact; zero times out on the first stalled evaluation.
+	 * A timeout completes the Avalon request with RESPONSE_SLVERR.
+	 */
+	public fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for Wishbone acknowledgement.
+	 */
+	public fn GetTimeoutTicks() uint
+	{
+		return timeoutTicks
+	}
+
+	/**
+	 * Returns true when the most recent downstream Wishbone cycle timed out.
+	 */
+	public fn LastTimedOut() bool
+	{
+		return lastTimedOut
+	}
+
+	/**
+	 * Converts each accepted Avalon request into one Wishbone Classic cycle.
+	 */
+	process Run()
+	{
+		var elapsed: uint = 0
+
+		state Idle {
+			this.upstream.waitrequest = 0b1
+			this.cyc = 0b0
+			this.stb = 0b0
+			this.we = 0b0
+			this.sel = 0b0000
+			if (this.upstream.write == 0b1) {
+				lastTimedOut = false
+				this.adr = this.upstream.address
+				this.sel = this.upstream.byteenable
+				this.datin = this.upstream.writedata
+				this.we = 0b1
+				this.cyc = 0b1
+				this.stb = 0b1
+				elapsed = 0
+				goto TransferWrite
+			}
+			elif (this.upstream.read == 0b1) {
+				lastTimedOut = false
+				this.adr = this.upstream.address
+				this.sel = 0b1111
+				this.we = 0b0
+				this.cyc = 0b1
+				this.stb = 0b1
+				elapsed = 0
+				goto TransferRead
+			}
+			else {
+				goto Idle
+			}
+		}
+
+		state TransferWrite {
+			if (this.ack == 0b1) {
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.we = 0b0
+				this.upstream.response = RESPONSE_OKAY
+				this.upstream.waitrequest = 0b0
+				goto Accepted
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.we = 0b0
+				this.upstream.response = RESPONSE_SLVERR
+				this.upstream.waitrequest = 0b0
+				goto Accepted
+			}
+			else {
+				elapsed = elapsed + 1
+				goto TransferWrite
+			}
+		}
+
+		state TransferRead {
+			if (this.ack == 0b1) {
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.upstream.readdata = this.datout
+				this.upstream.response = RESPONSE_OKAY
+				this.upstream.waitrequest = 0b0
+				goto Accepted
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.upstream.readdata = 0x00000000
+				this.upstream.response = RESPONSE_SLVERR
+				this.upstream.waitrequest = 0b0
+				goto Accepted
+			}
+			else {
+				elapsed = elapsed + 1
+				goto TransferRead
+			}
+		}
+
+		state Accepted {
+			this.upstream.waitrequest = 0b1
+			if (this.upstream.write == 0b0 && this.upstream.read == 0b0) {
+				goto Idle
+			}
+			else {
+				goto Accepted
+			}
+		}
+	}
+}

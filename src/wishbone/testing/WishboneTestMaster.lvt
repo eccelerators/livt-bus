@@ -12,9 +12,18 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	 * Byte-select value enabling all four data lanes.
 	 */
 	public const ALL_BYTES: Logic[4] = 0b1111
+	/**
+	 * Status returned after a Wishbone acknowledgement.
+	 */
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	/**
+	 * Status returned after a local Wishbone timeout.
+	 */
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
 
 	timeoutTicks: uint
 	lastReadValue: uint
+	lastResponse: Logic[2]
 	lastTimedOut: bool
 
 	new()
@@ -27,13 +36,15 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		this.cyc = 0b0
 		this.timeoutTicks = this.context.TicksFor(1ms)
 		this.lastReadValue = 0
+		this.lastResponse = RESPONSE_OKAY
 		this.lastTimedOut = false
 	}
 
 	/**
 	 * Sets the maximum ticks to wait for a Wishbone acknowledgement.
+	 * The count is exact; zero times out on the first stalled evaluation.
 	 */
-	public fn SetTimeoutTicks(timeoutTicks: uint)
+	override fn SetTimeoutTicks(timeoutTicks: uint)
 	{
 		this.timeoutTicks = timeoutTicks
 	}
@@ -41,37 +52,46 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	/**
 	 * Returns the maximum ticks allowed for an acknowledgement.
 	 */
-	public fn GetTimeoutTicks() uint
+	override fn GetTimeoutTicks() uint
 	{
-		return this.timeoutTicks
+		return timeoutTicks
 	}
 
 	/**
 	 * Returns the data captured by the most recently acknowledged read.
 	 */
-	public fn LastReadValue() uint
+	override fn LastReadValue() uint
 	{
-		return this.lastReadValue
+		return lastReadValue
+	}
+
+	/**
+	 * Returns the normalized status of the most recent transfer.
+	 */
+	override fn LastResponse() Logic[2]
+	{
+		return lastResponse
 	}
 
 	/**
 	 * Returns true when the most recent transfer timed out without acknowledgement.
 	 */
-	public fn LastTimedOut() bool
+	override fn LastTimedOut() bool
 	{
-		return this.lastTimedOut
+		return lastTimedOut
 	}
 
 	/**
 	 * Performs one Wishbone Classic write and returns true when ack is received.
 	 */
-	public fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	private fn ExecuteWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
 	{
 		var elapsed: uint = 0
 		var successful: bool = false
 
 		state Start {
-			this.lastTimedOut = false
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.adr = address as Logic[32]
@@ -88,8 +108,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 				successful = true
 				goto Finish
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				this.lastTimedOut = true
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastResponse = RESPONSE_SLVERR
+				lastTimedOut = true
 				successful = false
 				goto Finish
 			}
@@ -111,14 +132,15 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	/**
 	 * Performs one Wishbone Classic read and returns true when ack is received.
 	 */
-	public fn TryRead32(address: uint) bool
+	private fn ExecuteRead32(address: uint) bool
 	{
 		var elapsed: uint = 0
 		var successful: bool = false
 
 		state Start {
-			this.lastReadValue = 0
-			this.lastTimedOut = false
+			lastReadValue = 0
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.adr = address as Logic[32]
@@ -131,12 +153,13 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 
 		state Transfer {
 			if (this.ack == 0b1) {
-				this.lastReadValue = this.datout as uint
+				lastReadValue = this.datout as uint
 				successful = true
 				goto Finish
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				this.lastTimedOut = true
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastResponse = RESPONSE_SLVERR
+				lastTimedOut = true
 				successful = false
 				goto Finish
 			}
@@ -151,6 +174,26 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 			this.stb = 0b0
 			this.sel = 0b0000
 		}
+		return successful
+	}
+
+	/**
+	 * Provides the non-asserting write operation inherited by the common API.
+	 */
+	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var successful = this.ExecuteWrite32(address, value, byteEnable)
+		state Settle {}
+		return successful
+	}
+
+	/**
+	 * Provides the non-asserting read operation inherited by the common API.
+	 */
+	override fn TryRead32(address: uint) bool
+	{
+		var successful = this.ExecuteRead32(address)
+		state Settle {}
 		return successful
 	}
 
@@ -173,7 +216,8 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		elif (lane == 3) {
 			byteEnable = 0b1000
 		}
-		assert this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
+		assert completed
 	}
 
 	/**
@@ -190,7 +234,8 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		if (lane == 2) {
 			byteEnable = 0b1100
 		}
-		assert this.TryWrite32(alignedAddress, shiftedValue, byteEnable)
+		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
+		assert completed
 	}
 
 	/**
@@ -198,7 +243,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	 */
 	override fn Write32(address: uint, value: uint)
 	{
-		assert this.TryWrite32(address, value, ALL_BYTES)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteWrite32(address, value, ALL_BYTES)
+		assert completed
 	}
 
 	/**
@@ -206,7 +253,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	 */
 	override fn WriteMasked32(address: uint, value: uint, byteEnable: Logic[4])
 	{
-		assert this.TryWrite32(address, value, byteEnable)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteWrite32(address, value, byteEnable)
+		assert completed
 	}
 
 	/**
@@ -217,8 +266,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var lane = (address & (3 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		assert this.TryRead32(alignedAddress)
-		return (this.lastReadValue >> shift) as byte
+		var completed = this.ExecuteRead32(alignedAddress)
+		assert completed
+		return (lastReadValue >> shift) as byte
 	}
 
 	/**
@@ -230,8 +280,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var lane = (address & (2 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		assert this.TryRead32(alignedAddress)
-		return (this.lastReadValue >> shift) as Logic[16]
+		var completed = this.ExecuteRead32(alignedAddress)
+		assert completed
+		return (lastReadValue >> shift) as Logic[16]
 	}
 
 	/**
@@ -239,8 +290,10 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	 */
 	override fn Read32(address: uint) uint
 	{
-		assert this.TryRead32(address)
-		return this.lastReadValue
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteRead32(address)
+		assert completed
+		return lastReadValue
 	}
 
 	/**
@@ -251,9 +304,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var lane = (address & (3 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		var completed = this.TryRead32(alignedAddress)
+		var completed = this.ExecuteRead32(alignedAddress)
 		assert completed
-		assert ((this.lastReadValue >> shift) as byte) == expected
+		assert ((lastReadValue >> shift) as byte) == expected
 	}
 
 	/**
@@ -265,9 +318,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var lane = (address & (2 as uint)) as int
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
-		var completed = this.TryRead32(alignedAddress)
+		var completed = this.ExecuteRead32(alignedAddress)
 		assert completed
-		assert ((this.lastReadValue >> shift) as Logic[16]) == expected
+		assert ((lastReadValue >> shift) as Logic[16]) == expected
 	}
 
 	/**
@@ -275,9 +328,10 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	 */
 	override fn Verify32(address: uint, expected: uint)
 	{
-		var completed = this.TryRead32(address)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteRead32(address)
 		assert completed
-		assert this.lastReadValue == expected
+		assert lastReadValue == expected
 	}
 
 	/**
@@ -285,8 +339,9 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	 */
 	override fn VerifyMasked32(address: uint, expected: uint, mask: uint)
 	{
-		var completed = this.TryRead32(address)
+		assert (address & (3 as uint)) == (0 as uint)
+		var completed = this.ExecuteRead32(address)
 		assert completed
-		assert (this.lastReadValue & mask) == (expected & mask)
+		assert (lastReadValue & mask) == (expected & mask)
 	}
 }

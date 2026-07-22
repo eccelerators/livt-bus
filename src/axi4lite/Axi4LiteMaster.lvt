@@ -54,6 +54,7 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 
 	/**
 	 * Sets the timeout applied independently to each AXI handshake stage.
+	 * The count is exact; zero times out on the first stalled evaluation.
 	 */
 	override fn SetTimeoutTicks(timeoutTicks: uint)
 	{
@@ -65,7 +66,7 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	 */
 	override fn GetTimeoutTicks() uint
 	{
-		return this.timeoutTicks
+		return timeoutTicks
 	}
 
 	/**
@@ -73,15 +74,15 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	 */
 	override fn LastReadValue() uint
 	{
-		return this.lastReadValue
+		return lastReadValue
 	}
 
 	/**
 	 * Returns the AXI response captured by the most recently completed transaction.
 	 */
-	public fn LastResponse() Logic[2]
+	override fn LastResponse() Logic[2]
 	{
-		return this.lastResponse
+		return lastResponse
 	}
 
 	/**
@@ -89,12 +90,13 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	 */
 	override fn LastTimedOut() bool
 	{
-		return this.lastTimedOut
+		return lastTimedOut
 	}
 
 	/**
 	 * Performs one AXI4-Lite write using the selected byte lanes.
 	 * Returns true after a response handshake; inspect LastResponse for its status.
+	 * After a timeout, the call drains the outstanding transaction before returning.
 	 */
 	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
 	{
@@ -104,8 +106,8 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 		var successful: bool = false
 
 		state Start {
-			this.lastResponse = RESPONSE_OKAY
-			this.lastTimedOut = false
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			addressAccepted = false
 			dataAccepted = false
 			elapsed = 0
@@ -135,8 +137,10 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 				elapsed = 0
 				goto Response
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverWriteTransfer
 			}
 			else {
 				elapsed = elapsed + 1
@@ -146,11 +150,13 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 
 		state Response {
 			if (this.bvalid == 0b1) {
-				this.lastResponse = this.bresp
+				lastResponse = this.bresp
 				goto Complete
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverWriteResponse
 			}
 			else {
 				elapsed = elapsed + 1
@@ -162,18 +168,37 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 			this.awvalid = 0b0
 			this.wvalid = 0b0
 			this.bready = 0b0
-			this.lastTimedOut = false
+			lastTimedOut = false
 			successful = true
 			goto Finish
 		}
 
-		state Timeout {
-			this.awvalid = 0b0
-			this.wvalid = 0b0
-			this.bready = 0b0
-			this.lastTimedOut = true
-			successful = false
-			goto Finish
+		state RecoverWriteTransfer {
+			if (this.awready == 0b1) {
+				addressAccepted = true
+				this.awvalid = 0b0
+			}
+			if (this.wready == 0b1) {
+				dataAccepted = true
+				this.wvalid = 0b0
+			}
+			if (addressAccepted && dataAccepted) {
+				this.bready = 0b1
+				goto RecoverWriteResponse
+			}
+			else {
+				goto RecoverWriteTransfer
+			}
+		}
+
+		state RecoverWriteResponse {
+			if (this.bvalid == 0b1) {
+				this.bready = 0b0
+				goto Finish
+			}
+			else {
+				goto RecoverWriteResponse
+			}
 		}
 
 		state Finish {}
@@ -183,6 +208,7 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	/**
 	 * Performs one AXI4-Lite read and stores its data for LastReadValue.
 	 * Returns true after a data handshake; inspect LastResponse for its status.
+	 * After a timeout, the call drains the outstanding transaction before returning.
 	 */
 	override fn TryRead32(address: uint) bool
 	{
@@ -190,9 +216,9 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 		var successful: bool = false
 
 		state Start {
-			this.lastReadValue = 0
-			this.lastResponse = RESPONSE_OKAY
-			this.lastTimedOut = false
+			lastReadValue = 0
+			lastResponse = RESPONSE_OKAY
+			lastTimedOut = false
 			elapsed = 0
 			successful = false
 			this.araddr = address as Logic[32]
@@ -209,8 +235,10 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 				elapsed = 0
 				goto Data
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverReadAddress
 			}
 			else {
 				elapsed = elapsed + 1
@@ -220,12 +248,14 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 
 		state Data {
 			if (this.rvalid == 0b1) {
-				this.lastReadValue = this.rdata as uint
-				this.lastResponse = this.rresp
+				lastReadValue = this.rdata as uint
+				lastResponse = this.rresp
 				goto Complete
 			}
-			elif (elapsed >= this.timeoutTicks) {
-				goto Timeout
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				successful = false
+				goto RecoverReadData
 			}
 			else {
 				elapsed = elapsed + 1
@@ -236,17 +266,30 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 		state Complete {
 			this.arvalid = 0b0
 			this.rready = 0b0
-			this.lastTimedOut = false
+			lastTimedOut = false
 			successful = true
 			goto Finish
 		}
 
-		state Timeout {
-			this.arvalid = 0b0
-			this.rready = 0b0
-			this.lastTimedOut = true
-			successful = false
-			goto Finish
+		state RecoverReadAddress {
+			if (this.arready == 0b1) {
+				this.arvalid = 0b0
+				this.rready = 0b1
+				goto RecoverReadData
+			}
+			else {
+				goto RecoverReadAddress
+			}
+		}
+
+		state RecoverReadData {
+			if (this.rvalid == 0b1) {
+				this.rready = 0b0
+				goto Finish
+			}
+			else {
+				goto RecoverReadData
+			}
 		}
 
 		state Finish {}

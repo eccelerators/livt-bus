@@ -36,7 +36,7 @@ component WishboneTestSlave
 	{
 		var index: int = 0
 		while (index < 16) {
-			this.registers[index] = 0
+			registers[index] = 0
 			index = index + 1
 		}
 	}
@@ -59,10 +59,14 @@ component WishboneTestSlave
 		}
 
 		state WaitForAck {
-			if (elapsed >= this.ackDelay) {
+			if (this.bus.cyc == 0b0 || this.bus.stb == 0b0) {
+				this.bus.ack = 0b0
+				goto Idle
+			}
+			elif (elapsed >= ackDelay) {
 				registerIndex = ((this.bus.adr as uint) >> 2) as int
 				if (this.bus.we == 0b1 && registerIndex >= 0 && registerIndex < 16) {
-					nextValue = this.registers[registerIndex]
+					nextValue = registers[registerIndex]
 					if (this.bus.sel[0] == 0b1) {
 						nextValue = (nextValue & (0xFFFFFF00 as uint)) | ((this.bus.datin as uint) & (0x000000FF as uint))
 					}
@@ -75,11 +79,11 @@ component WishboneTestSlave
 					if (this.bus.sel[3] == 0b1) {
 						nextValue = (nextValue & (0x00FFFFFF as uint)) | ((this.bus.datin as uint) & (0xFF000000 as uint))
 					}
-					this.registers[registerIndex] = nextValue
+					registers[registerIndex] = nextValue
 				}
 				if (this.bus.we == 0b0) {
 					if (registerIndex >= 0 && registerIndex < 16) {
-						this.bus.datout = this.registers[registerIndex] as Logic[32]
+						this.bus.datout = registers[registerIndex] as Logic[32]
 					}
 					else {
 						this.bus.datout = 0x00000000

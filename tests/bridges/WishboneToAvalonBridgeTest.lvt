@@ -1,0 +1,76 @@
+namespace Livt.Bus.Tests.Bridges
+
+using Livt.Bus.Avalon.Testing
+using Livt.Bus.Bridges
+using Livt.Bus.Wishbone.Testing
+
+/**
+ * Verifies Wishbone Classic cycles converted to Avalon-MM.
+ */
+@Test
+component WishboneToAvalonBridgeTest
+{
+	// Wishbone transaction source under test.
+	upstream: WishboneTestMaster
+	// Bridge subject under test.
+	bridge: WishboneToAvalonBridge32
+	// Configurable Avalon-MM target.
+	target: AvalonTestSlave
+
+	/**
+	 * Connects the Wishbone source, bridge, and Avalon target.
+	 */
+	new()
+	{
+		this.upstream = new WishboneTestMaster()
+		this.bridge = new WishboneToAvalonBridge32(this.upstream)
+		this.target = new AvalonTestSlave(this.bridge)
+	}
+
+	/**
+	 * Verifies delayed requests, masked writes, stored responses, and timeouts.
+	 */
+	@Test
+	fn ForwardsTransactionsAndRecordsResponse()
+	{
+		target.Clear()
+		target.Configure(2 as uint, 0b00)
+		var bridgeTimeout = this.context.TicksFor(10us)
+		var upstreamTimeout = this.context.TicksFor(20us)
+		bridge.SetTimeoutTicks(bridgeTimeout)
+		upstream.SetTimeoutTicks(upstreamTimeout)
+		assert bridge.GetTimeoutTicks() == bridgeTimeout
+		assert upstream.TryWrite32(0x08 as uint, 0x12345678 as uint, 0b1111) == true
+		assert upstream.TryWrite32(0x08 as uint, 0xAA00CC00 as uint, 0b1010) == true
+		assert upstream.TryRead32(0x08 as uint) == true
+		assert upstream.LastReadValue() == (0xAA34CC78 as uint)
+		assert bridge.LastResponse() == 0b00
+		assert bridge.LastTimedOut() == false
+		target.Configure(0 as uint, 0b10)
+		assert upstream.TryRead32(0x08 as uint) == true
+		assert bridge.LastResponse() == 0b10
+		assert bridge.LastTimedOut() == false
+
+		bridge.SetTimeoutTicks(3 as uint)
+		upstream.SetTimeoutTicks(10 as uint)
+
+		target.Configure(100 as uint, 0b00)
+		assert upstream.TryWrite32(0x10 as uint, 0x55667788 as uint, 0b1111) == false
+		assert bridge.IsRecovering() == true
+		Simulation.Wait(120)
+		assert bridge.IsRecovering() == false
+
+		assert upstream.TryRead32(0x08 as uint) == false
+		assert bridge.LastResponse() == WishboneToAvalonBridge32.RESPONSE_SLVERR
+		assert bridge.LastTimedOut() == true
+		Simulation.Wait(120)
+		assert bridge.IsRecovering() == false
+
+		target.Configure(0 as uint, 0b00)
+		bridge.SetTimeoutTicks(10 as uint)
+		upstream.SetTimeoutTicks(30 as uint)
+		assert upstream.TryRead32(0x08 as uint) == true
+		assert upstream.LastReadValue() == (0xAA34CC78 as uint)
+		assert bridge.LastTimedOut() == false
+	}
+}

@@ -1,0 +1,98 @@
+namespace Livt.Bus.Tests.Bridges
+
+using Livt.Bus.Axi4Lite.Testing
+using Livt.Bus.Bridges
+using Livt.Bus.Wishbone.Testing
+
+/**
+ * Verifies Wishbone Classic cycles converted to AXI4-Lite.
+ */
+@Test
+component WishboneToAxi4LiteBridgeTest
+{
+	// Wishbone transaction source under test.
+	upstream: WishboneTestMaster
+	// Bridge subject under test.
+	bridge: WishboneToAxi4LiteBridge32
+	// Configurable AXI4-Lite target.
+	target: Axi4LiteTestSlave
+
+	/**
+	 * Connects the Wishbone source, bridge, and AXI4-Lite target.
+	 */
+	new()
+	{
+		this.upstream = new WishboneTestMaster()
+		this.bridge = new WishboneToAxi4LiteBridge32(this.upstream)
+		this.target = new Axi4LiteTestSlave(this.bridge)
+	}
+
+	/**
+	 * Verifies independent AXI handshakes, stored responses, and timeout status.
+	 */
+	@Test
+	fn ForwardsTransactionsAndRecordsResponse()
+	{
+		target.Clear()
+		target.ConfigureDelays(2, 0, 2, 1, 2)
+		var bridgeTimeout = this.context.TicksFor(10us)
+		var upstreamTimeout = this.context.TicksFor(20us)
+		bridge.SetTimeoutTicks(bridgeTimeout)
+		upstream.SetTimeoutTicks(upstreamTimeout)
+		assert bridge.GetTimeoutTicks() == bridgeTimeout
+		assert upstream.TryWrite32(0x0C as uint, 0x11223344 as uint, 0b1111) == true
+		assert upstream.TryWrite32(0x0C as uint, 0xAA00CC00 as uint, 0b1010) == true
+		assert upstream.TryRead32(0x0C as uint) == true
+		assert upstream.LastReadValue() == (0xAA22CC44 as uint)
+		assert bridge.LastResponse() == 0b00
+		assert bridge.LastTimedOut() == false
+		target.ConfigureResponses(0b10, 0b11)
+		assert upstream.TryRead32(0x0C as uint) == true
+		assert bridge.LastResponse() == 0b11
+		assert bridge.LastTimedOut() == false
+
+		target.ConfigureResponses(0b00, 0b00)
+		bridge.SetTimeoutTicks(3 as uint)
+		upstream.SetTimeoutTicks(10 as uint)
+
+		// Exercise timeout recovery at every independently stalled AXI stage.
+		target.ConfigureDelays(100, 0, 0, 0, 0)
+		assert upstream.TryWrite32(0x10 as uint, 0x11111111 as uint, 0b1111) == false
+		assert bridge.IsRecovering() == true
+		Simulation.Wait(120)
+		assert bridge.IsRecovering() == false
+
+		target.ConfigureDelays(0, 100, 0, 0, 0)
+		assert upstream.TryWrite32(0x10 as uint, 0x22222222 as uint, 0b1111) == false
+		assert bridge.IsRecovering() == true
+		Simulation.Wait(120)
+		assert bridge.IsRecovering() == false
+
+		target.ConfigureDelays(0, 0, 100, 0, 0)
+		assert upstream.TryWrite32(0x10 as uint, 0x33333333 as uint, 0b1111) == false
+		assert bridge.IsRecovering() == true
+		Simulation.Wait(120)
+		assert bridge.IsRecovering() == false
+
+		target.ConfigureDelays(0, 0, 0, 100, 0)
+		assert upstream.TryRead32(0x0C as uint) == false
+		assert bridge.IsRecovering() == true
+		Simulation.Wait(120)
+		assert bridge.IsRecovering() == false
+
+		target.ConfigureDelays(0, 0, 0, 0, 100)
+		assert upstream.TryRead32(0x0C as uint) == false
+		assert bridge.LastResponse() == WishboneToAxi4LiteBridge32.RESPONSE_SLVERR
+		assert bridge.LastTimedOut() == true
+		assert bridge.IsRecovering() == true
+		Simulation.Wait(120)
+		assert bridge.IsRecovering() == false
+
+		target.ConfigureDelays(0, 0, 0, 0, 0)
+		bridge.SetTimeoutTicks(10 as uint)
+		upstream.SetTimeoutTicks(30 as uint)
+		assert upstream.TryRead32(0x0C as uint) == true
+		assert upstream.LastReadValue() == (0xAA22CC44 as uint)
+		assert bridge.LastTimedOut() == false
+	}
+}

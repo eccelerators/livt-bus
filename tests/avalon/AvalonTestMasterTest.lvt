@@ -17,33 +17,42 @@ component AvalonTestMasterTest
 	@Test
 	fn ExercisesVerificationApi()
 	{
-		this.slave.Clear()
+		slave.Clear()
 		var timeoutTicks = this.context.TicksFor(2us)
-		this.master.SetTimeoutTicks(timeoutTicks)
-		assert this.master.GetTimeoutTicks() == timeoutTicks
-		this.slave.Configure(2 as uint, 0b00)
+		master.SetTimeoutTicks(timeoutTicks)
+		assert master.GetTimeoutTicks() == timeoutTicks
+		slave.Configure(2 as uint, 0b00)
 
-		this.master.Write32(0x04 as uint, 0x11223344 as uint)
-		this.master.Verify32(0x04 as uint, 0x11223344 as uint)
-		this.master.WriteMasked32(0x04 as uint, 0xAA00CC00 as uint, 0b1010)
-		this.master.VerifyMasked32(0x04 as uint, 0xAA22CC44 as uint, 0xFFFFFFFF as uint)
+		master.Write32(0x04 as uint, 0x11223344 as uint)
+		master.Verify32(0x04 as uint, 0x11223344 as uint)
+		master.WriteMasked32(0x04 as uint, 0xAA00CC00 as uint, 0b1010)
+		master.VerifyMasked32(0x04 as uint, 0xAA22CC44 as uint, 0xFFFFFFFF as uint)
 
-		this.master.Write8(0x05 as uint, 0x5A as byte)
-		this.master.Verify8(0x05 as uint, 0x5A as byte)
-		assert this.master.Read8(0x05 as uint) == (0x5A as byte)
+		master.Write8(0x05 as uint, 0x5A as byte)
+		master.Verify8(0x05 as uint, 0x5A as byte)
+		assert master.Read8(0x05 as uint) == (0x5A as byte)
 
-		this.master.Write16(0x06 as uint, 0xCAFE as Logic[16])
-		this.master.Verify16(0x06 as uint, 0xCAFE as Logic[16])
-		assert this.master.Read16(0x06 as uint) == (0xCAFE as Logic[16])
-		assert this.master.Read32(0x04 as uint) == (0xCAFE5A44 as uint)
+		master.Write16(0x06 as uint, 0xCAFE as Logic[16])
+		master.Verify16(0x06 as uint, 0xCAFE as Logic[16])
+		assert master.Read16(0x06 as uint) == (0xCAFE as Logic[16])
+		assert master.Read32(0x04 as uint) == (0xCAFE5A44 as uint)
 	}
 
 	@Test
 	fn ExposesNonAssertingResponseApi()
 	{
-		this.slave.Configure(0 as uint, 0b10)
-		assert this.master.TryRead32(0x04 as uint)
-		assert this.master.LastResponse() == 0b10
-		assert this.master.LastTimedOut() == false
+		slave.Configure(0 as uint, 0b10)
+		assert master.TryRead32(0x04 as uint)
+		assert master.LastResponse() == 0b10
+		assert master.LastTimedOut() == false
+
+		master.SetTimeoutTicks(2 as uint)
+		slave.Configure(20 as uint, 0b00)
+		assert master.TryWrite32(0x08 as uint, 0x12345678 as uint, 0b1111) == false
+		assert master.LastTimedOut()
+		slave.Configure(0 as uint, 0b00)
+		master.SetTimeoutTicks(10 as uint)
+		assert master.TryRead32(0x08 as uint)
+		assert master.LastReadValue() == (0x12345678 as uint)
 	}
 }

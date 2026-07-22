@@ -1,0 +1,228 @@
+namespace Livt.Bus.Bridges
+
+using Livt.Bus.Axi4Lite
+using Livt.Bus.Wishbone
+
+/**
+ * Converts AXI4-Lite transactions into Wishbone Classic cycles.
+ * The bridge accepts AXI write address and data independently and supports one
+ * downstream transaction at a time.
+ */
+component Axi4LiteToWishboneBridge32 : IWishbone32Master
+{
+	// Response returned to AXI after normal Wishbone acknowledgement.
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	// Response returned to AXI when Wishbone acknowledgement times out.
+	public const RESPONSE_SLVERR: Logic[2] = 0b10
+
+	// AXI4-Lite source connected to the upstream side of this bridge.
+	upstream: IAxi4Lite32Master
+	// Maximum ticks to wait for downstream Wishbone acknowledgement.
+	timeoutTicks: uint
+	// True only when the most recent downstream cycle timed out.
+	lastTimedOut: bool
+
+	/**
+	 * Connects an AXI4-Lite source and initializes the Wishbone master outputs.
+	 * The default acknowledgement timeout is 1 ms.
+	 */
+	new(upstream: flip IAxi4Lite32Master)
+	{
+		this.upstream = upstream
+		this.upstream.awready = 0b0
+		this.upstream.wready = 0b0
+		this.upstream.bresp = RESPONSE_OKAY
+		this.upstream.bvalid = 0b0
+		this.upstream.arready = 0b0
+		this.upstream.rdata = 0x00000000
+		this.upstream.rresp = RESPONSE_OKAY
+		this.upstream.rvalid = 0b0
+		this.adr = 0x00000000
+		this.sel = 0b0000
+		this.we = 0b0
+		this.stb = 0b0
+		this.datin = 0x00000000
+		this.cyc = 0b0
+		this.timeoutTicks = this.context.TicksFor(1ms)
+		this.lastTimedOut = false
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for downstream Wishbone acknowledgement.
+	 * The count is exact; zero times out on the first stalled evaluation.
+	 * A timeout returns RESPONSE_SLVERR on the matching AXI response channel.
+	 */
+	public fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for Wishbone acknowledgement.
+	 */
+	public fn GetTimeoutTicks() uint
+	{
+		return timeoutTicks
+	}
+
+	/**
+	 * Returns true when the most recent downstream Wishbone cycle timed out.
+	 */
+	public fn LastTimedOut() bool
+	{
+		return lastTimedOut
+	}
+
+	/**
+	 * Captures AXI channels and sequences one corresponding Wishbone cycle.
+	 */
+	process Run()
+	{
+		var writeAddress: Logic[32] = 0x00000000
+		var writeValue: Logic[32] = 0x00000000
+		var writeEnable: Logic[4] = 0b0000
+		var addressAccepted: bool = false
+		var dataAccepted: bool = false
+		var elapsed: uint = 0
+
+		state Idle {
+			this.upstream.awready = 0b0
+			this.upstream.wready = 0b0
+			this.upstream.arready = 0b0
+			this.upstream.bvalid = 0b0
+			this.upstream.rvalid = 0b0
+			this.cyc = 0b0
+			this.stb = 0b0
+			this.we = 0b0
+			this.sel = 0b0000
+			addressAccepted = false
+			dataAccepted = false
+
+			if (this.upstream.awvalid == 0b1 || this.upstream.wvalid == 0b1) {
+				lastTimedOut = false
+				this.upstream.awready = 0b1
+				this.upstream.wready = 0b1
+				goto CaptureWrite
+			}
+			elif (this.upstream.arvalid == 0b1) {
+				lastTimedOut = false
+				this.upstream.arready = 0b1
+				goto CaptureRead
+			}
+			else {
+				goto Idle
+			}
+		}
+
+		state CaptureWrite {
+			if (addressAccepted == false && this.upstream.awvalid == 0b1) {
+				writeAddress = this.upstream.awaddr
+				addressAccepted = true
+				this.upstream.awready = 0b0
+			}
+			if (dataAccepted == false && this.upstream.wvalid == 0b1) {
+				writeValue = this.upstream.wdata
+				writeEnable = this.upstream.wstrb
+				dataAccepted = true
+				this.upstream.wready = 0b0
+			}
+			if (addressAccepted && dataAccepted) {
+				this.adr = writeAddress
+				this.datin = writeValue
+				this.sel = writeEnable
+				this.we = 0b1
+				this.cyc = 0b1
+				this.stb = 0b1
+				elapsed = 0
+				goto WishboneWrite
+			}
+			else {
+				goto CaptureWrite
+			}
+		}
+
+		state WishboneWrite {
+			if (this.ack == 0b1) {
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.we = 0b0
+				this.upstream.bresp = RESPONSE_OKAY
+				this.upstream.bvalid = 0b1
+				goto WriteResponse
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.we = 0b0
+				this.upstream.bresp = RESPONSE_SLVERR
+				this.upstream.bvalid = 0b1
+				goto WriteResponse
+			}
+			else {
+				elapsed = elapsed + 1
+				goto WishboneWrite
+			}
+		}
+
+		state WriteResponse {
+			if (this.upstream.bready == 0b1) {
+				this.upstream.bvalid = 0b0
+				goto Idle
+			}
+			else {
+				goto WriteResponse
+			}
+		}
+
+		state CaptureRead {
+			if (this.upstream.arvalid == 0b1) {
+				this.adr = this.upstream.araddr
+				this.sel = 0b1111
+				this.we = 0b0
+				this.cyc = 0b1
+				this.stb = 0b1
+				this.upstream.arready = 0b0
+				elapsed = 0
+				goto WishboneRead
+			}
+			else {
+				goto CaptureRead
+			}
+		}
+
+		state WishboneRead {
+			if (this.ack == 0b1) {
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.upstream.rdata = this.datout
+				this.upstream.rresp = RESPONSE_OKAY
+				this.upstream.rvalid = 0b1
+				goto ReadResponse
+			}
+			elif ((elapsed + 1) >= timeoutTicks) {
+				lastTimedOut = true
+				this.cyc = 0b0
+				this.stb = 0b0
+				this.upstream.rdata = 0x00000000
+				this.upstream.rresp = RESPONSE_SLVERR
+				this.upstream.rvalid = 0b1
+				goto ReadResponse
+			}
+			else {
+				elapsed = elapsed + 1
+				goto WishboneRead
+			}
+		}
+
+		state ReadResponse {
+			if (this.upstream.rready == 0b1) {
+				this.upstream.rvalid = 0b0
+				goto Idle
+			}
+			else {
+				goto ReadResponse
+			}
+		}
+	}
+}
