@@ -217,7 +217,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 			byteEnable = 0b1000
 		}
 		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
-		assert completed
+		assert completed == true
 	}
 
 	/**
@@ -235,7 +235,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 			byteEnable = 0b1100
 		}
 		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
-		assert completed
+		assert completed == true
 	}
 
 	/**
@@ -245,7 +245,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteWrite32(address, value, ALL_BYTES)
-		assert completed
+		assert completed == true
 	}
 
 	/**
@@ -255,7 +255,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteWrite32(address, value, byteEnable)
-		assert completed
+		assert completed == true
 	}
 
 	/**
@@ -267,7 +267,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		return (lastReadValue >> shift) as byte
 	}
 
@@ -281,7 +281,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		return (lastReadValue >> shift) as Logic[16]
 	}
 
@@ -292,7 +292,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteRead32(address)
-		assert completed
+		assert completed == true
 		return lastReadValue
 	}
 
@@ -305,7 +305,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		assert ((lastReadValue >> shift) as byte) == expected
 	}
 
@@ -319,7 +319,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		assert ((lastReadValue >> shift) as Logic[16]) == expected
 	}
 
@@ -330,7 +330,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteRead32(address)
-		assert completed
+		assert completed == true
 		assert lastReadValue == expected
 	}
 
@@ -341,7 +341,7 @@ component WishboneTestMaster : IWishbone32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteRead32(address)
-		assert completed
+		assert completed == true
 		assert (lastReadValue & mask) == (expected & mask)
 	}
 }

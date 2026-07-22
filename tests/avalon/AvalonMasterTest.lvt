@@ -23,14 +23,14 @@ component AvalonMasterTest
 		master.SetTimeoutTicks(timeoutTicks)
 		slave.Configure(3 as uint, 0b00)
 
-		assert master.TryWrite32(0x08 as uint, 0x11223344 as uint, 0b1111)
-		assert master.TryWrite32(0x08 as uint, 0xAA00CC00 as uint, 0b1010)
-		assert master.TryRead32(0x08 as uint)
+		assert master.TryWrite32(0x08 as uint, 0x11223344 as uint, 0b1111) == true
+		assert master.TryWrite32(0x08 as uint, 0xAA00CC00 as uint, 0b1010) == true
+		assert master.TryRead32(0x08 as uint) == true
 		assert master.LastReadValue() == (0xAA22CC44 as uint)
 		assert master.LastResponse() == AvalonMaster.RESPONSE_OKAY
 
 		slave.Configure(0 as uint, 0b10)
-		assert master.TryRead32(0x08 as uint)
+		assert master.TryRead32(0x08 as uint) == true
 		assert master.LastResponse() == 0b10
 		assert master.read == 0b0
 		assert master.write == 0b0
@@ -43,20 +43,14 @@ component AvalonMasterTest
 		master.SetTimeoutTicks(2 as uint)
 		slave.Configure(20 as uint, 0b00)
 		assert master.TryWrite32(0x00 as uint, 0x55AA55AA as uint, 0b1111) == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 		assert master.write == 0b0
 
 		// Recovery holds the timed-out request stable until Avalon accepts it.
 		slave.Configure(0 as uint, 0b00)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00 as uint)
+		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastReadValue() == (0x55AA55AA as uint)
 		assert master.LastTimedOut() == false
-
-		// The configured deadline deterministically distinguishes failure and success.
-		master.SetTimeoutTicks(2 as uint)
-		assert master.TryRead32(0x00 as uint) == false
-		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00 as uint)
 	}
 }

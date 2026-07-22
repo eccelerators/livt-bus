@@ -337,7 +337,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 			byteEnable = 0b1000
 		}
 		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 	}
 
@@ -356,7 +356,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 			byteEnable = 0b1100
 		}
 		var completed = this.ExecuteWrite32(alignedAddress, shiftedValue, byteEnable)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 	}
 
@@ -367,7 +367,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteWrite32(address, value, ALL_BYTES)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 	}
 
@@ -378,7 +378,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteWrite32(address, value, byteEnable)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 	}
 
@@ -391,7 +391,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 		return (lastReadValue >> shift) as byte
 	}
@@ -406,7 +406,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 		return (lastReadValue >> shift) as Logic[16]
 	}
@@ -418,7 +418,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteRead32(address)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 		return lastReadValue
 	}
@@ -432,7 +432,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 		assert ((lastReadValue >> shift) as byte) == expected
 	}
@@ -447,7 +447,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 		var shift = lane * 8
 		var alignedAddress = address & (0xFFFFFFFC as uint)
 		var completed = this.ExecuteRead32(alignedAddress)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 		assert ((lastReadValue >> shift) as Logic[16]) == expected
 	}
@@ -459,7 +459,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteRead32(address)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 		assert lastReadValue == expected
 	}
@@ -471,7 +471,7 @@ component Axi4LiteTestMaster : IAxi4Lite32Master, IMemoryMappedBus32
 	{
 		assert (address & (3 as uint)) == (0 as uint)
 		var completed = this.ExecuteRead32(address)
-		assert completed
+		assert completed == true
 		assert lastResponse == RESPONSE_OKAY
 		assert (lastReadValue & mask) == (expected & mask)
 	}

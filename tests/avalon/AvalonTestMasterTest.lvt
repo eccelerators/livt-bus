@@ -42,17 +42,17 @@ component AvalonTestMasterTest
 	fn ExposesNonAssertingResponseApi()
 	{
 		slave.Configure(0 as uint, 0b10)
-		assert master.TryRead32(0x04 as uint)
+		assert master.TryRead32(0x04 as uint) == true
 		assert master.LastResponse() == 0b10
 		assert master.LastTimedOut() == false
 
 		master.SetTimeoutTicks(2 as uint)
 		slave.Configure(20 as uint, 0b00)
 		assert master.TryWrite32(0x08 as uint, 0x12345678 as uint, 0b1111) == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 		slave.Configure(0 as uint, 0b00)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x08 as uint)
+		assert master.TryRead32(0x08 as uint) == true
 		assert master.LastReadValue() == (0x12345678 as uint)
 	}
 }

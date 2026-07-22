@@ -1,0 +1,36 @@
+namespace Livt.Bus.Tests.Wishbone
+
+using Livt.Bus.Wishbone
+using Livt.Bus.Wishbone.Testing
+
+/**
+ * Verifies Wishbone timeout immediately before the acknowledgement boundary.
+ */
+@Test
+component WishboneTimeoutBeforeBoundaryTest
+{
+	master: WishboneMaster
+	target: WishboneTestSlave
+
+	/**
+	 * Creates a fresh fixture for the failing boundary.
+	 */
+	new()
+	{
+		this.master = new WishboneMaster()
+		this.target = new WishboneTestSlave(this.master)
+	}
+
+	/**
+	 * Verifies timeout after six stalls, one evaluation before acknowledgement.
+	 */
+	@Test
+	fn TimesOutImmediatelyBeforeAcknowledgement()
+	{
+		target.Clear()
+		target.ConfigureAckDelay(0 as uint)
+		master.SetTimeoutTicks(6 as uint)
+		assert master.TryRead32(0x00 as uint) == false
+		assert master.LastTimedOut() == true
+	}
+}

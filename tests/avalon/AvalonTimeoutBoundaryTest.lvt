@@ -1,0 +1,36 @@
+namespace Livt.Bus.Tests.Avalon
+
+using Livt.Bus.Avalon
+using Livt.Bus.Avalon.Testing
+
+/**
+ * Verifies the exact Avalon-MM request timeout boundary.
+ */
+@Test
+component AvalonTimeoutBoundaryTest
+{
+	master: AvalonMaster
+	target: AvalonTestSlave
+
+	/**
+	 * Creates a fresh fixture for the successful boundary.
+	 */
+	new()
+	{
+		this.master = new AvalonMaster()
+		this.target = new AvalonTestSlave(this.master)
+	}
+
+	/**
+	 * Verifies success when acceptance arrives on the seventh evaluation.
+	 */
+	@Test
+	fn CountsTheConfiguredDeadlineExactly()
+	{
+		target.Clear()
+		target.Configure(0 as uint, 0b00)
+		master.SetTimeoutTicks(7 as uint)
+		assert master.TryRead32(0x00 as uint) == true
+		assert master.LastTimedOut() == false
+	}
+}

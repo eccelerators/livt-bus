@@ -23,20 +23,20 @@ component Axi4LiteMasterTest
 		master.SetTimeoutTicks(timeoutTicks)
 		slave.ConfigureDelays(2, 0, 2, 1, 2)
 
-		assert master.TryWrite32(0x04 as uint, 0x12345678 as uint, 0b1111)
+		assert master.TryWrite32(0x04 as uint, 0x12345678 as uint, 0b1111) == true
 		assert master.LastResponse() == Axi4LiteMaster.RESPONSE_OKAY
-		assert master.TryRead32(0x04 as uint)
+		assert master.TryRead32(0x04 as uint) == true
 		assert master.LastReadValue() == (0x12345678 as uint)
 
-		assert master.TryWrite32(0x04 as uint, 0x00AA00CC as uint, 0b0101)
-		assert master.TryRead32(0x04 as uint)
+		assert master.TryWrite32(0x04 as uint, 0x00AA00CC as uint, 0b0101) == true
+		assert master.TryRead32(0x04 as uint) == true
 		assert master.LastReadValue() == (0x12AA56CC as uint)
 		assert master.LastTimedOut() == false
 
 		slave.ConfigureResponses(0b10, 0b11)
-		assert master.TryWrite32(0x08 as uint, 0xA5A55A5A as uint, 0b1111)
+		assert master.TryWrite32(0x08 as uint, 0xA5A55A5A as uint, 0b1111) == true
 		assert master.LastResponse() == 0b10
-		assert master.TryRead32(0x08 as uint)
+		assert master.TryRead32(0x08 as uint) == true
 		assert master.LastResponse() == 0b11
 
 		assert master.awvalid == 0b0
@@ -53,7 +53,7 @@ component Axi4LiteMasterTest
 		slave.ConfigureResponses(0b00, 0b00)
 		slave.ConfigureDelays(20, 20, 0, 0, 0)
 		assert master.TryWrite32(0x00 as uint, 0x55AA55AA as uint, 0b1111) == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 		assert master.awvalid == 0b0
 		assert master.wvalid == 0b0
 		assert master.bready == 0b0
@@ -61,7 +61,7 @@ component Axi4LiteMasterTest
 		// The timed-out write is drained without changing its payload.
 		slave.ConfigureDelays(0, 0, 0, 0, 0)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00 as uint)
+		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastReadValue() == (0x55AA55AA as uint)
 		assert master.LastTimedOut() == false
 	}

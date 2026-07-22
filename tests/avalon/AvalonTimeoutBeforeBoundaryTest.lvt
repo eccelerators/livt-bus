@@ -1,0 +1,36 @@
+namespace Livt.Bus.Tests.Avalon
+
+using Livt.Bus.Avalon
+using Livt.Bus.Avalon.Testing
+
+/**
+ * Verifies Avalon-MM timeout immediately before the acceptance boundary.
+ */
+@Test
+component AvalonTimeoutBeforeBoundaryTest
+{
+	master: AvalonMaster
+	target: AvalonTestSlave
+
+	/**
+	 * Creates a fresh fixture for the failing boundary.
+	 */
+	new()
+	{
+		this.master = new AvalonMaster()
+		this.target = new AvalonTestSlave(this.master)
+	}
+
+	/**
+	 * Verifies timeout after six stalls, one evaluation before acceptance.
+	 */
+	@Test
+	fn TimesOutImmediatelyBeforeAcceptance()
+	{
+		target.Clear()
+		target.Configure(0 as uint, 0b00)
+		master.SetTimeoutTicks(6 as uint)
+		assert master.TryRead32(0x00 as uint) == false
+		assert master.LastTimedOut() == true
+	}
+}

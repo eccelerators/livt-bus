@@ -22,13 +22,13 @@ component Axi4LiteWriteResponseTimeoutTest
 		slave.ConfigureDelays(0, 0, 20, 0, 0)
 		var completed = master.TryWrite32(0x00 as uint, 0x12345678 as uint, 0b1111)
 		assert completed == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 		assert master.awvalid == 0b0
 		assert master.wvalid == 0b0
 		assert master.bready == 0b0
 		slave.ConfigureDelays(0, 0, 0, 0, 0)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00 as uint)
+		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastReadValue() == (0x12345678 as uint)
 	}
 }
@@ -52,12 +52,12 @@ component Axi4LiteReadAddressTimeoutTest
 		slave.ConfigureDelays(0, 0, 0, 20, 0)
 		var completed = master.TryRead32(0x00 as uint)
 		assert completed == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 		assert master.arvalid == 0b0
 		assert master.rready == 0b0
 		slave.ConfigureDelays(0, 0, 0, 0, 0)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00 as uint)
+		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastTimedOut() == false
 	}
 }
@@ -81,12 +81,12 @@ component Axi4LiteReadDataTimeoutTest
 		slave.ConfigureDelays(0, 0, 0, 0, 20)
 		var completed = master.TryRead32(0x00 as uint)
 		assert completed == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 		assert master.arvalid == 0b0
 		assert master.rready == 0b0
 		slave.ConfigureDelays(0, 0, 0, 0, 0)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00 as uint)
+		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastTimedOut() == false
 	}
 }

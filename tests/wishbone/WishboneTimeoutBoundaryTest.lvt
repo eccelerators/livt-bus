@@ -1,0 +1,36 @@
+namespace Livt.Bus.Tests.Wishbone
+
+using Livt.Bus.Wishbone
+using Livt.Bus.Wishbone.Testing
+
+/**
+ * Verifies the exact Wishbone acknowledgement timeout boundary.
+ */
+@Test
+component WishboneTimeoutBoundaryTest
+{
+	master: WishboneMaster
+	target: WishboneTestSlave
+
+	/**
+	 * Creates a fresh fixture for the successful boundary.
+	 */
+	new()
+	{
+		this.master = new WishboneMaster()
+		this.target = new WishboneTestSlave(this.master)
+	}
+
+	/**
+	 * Verifies success when acknowledgement arrives on the seventh evaluation.
+	 */
+	@Test
+	fn CountsTheConfiguredDeadlineExactly()
+	{
+		target.Clear()
+		target.ConfigureAckDelay(0 as uint)
+		master.SetTimeoutTicks(7 as uint)
+		assert master.TryRead32(0x00 as uint) == true
+		assert master.LastTimedOut() == false
+	}
+}

@@ -1,0 +1,36 @@
+namespace Livt.Bus.Tests.Axi4Lite
+
+using Livt.Bus.Axi4Lite
+using Livt.Bus.Axi4Lite.Testing
+
+/**
+ * Verifies the exact AXI4-Lite handshake-stage timeout boundary.
+ */
+@Test
+component Axi4LiteTimeoutBoundaryTest
+{
+	master: Axi4LiteMaster
+	target: Axi4LiteTestSlave
+
+	/**
+	 * Creates a fresh fixture for the successful boundary.
+	 */
+	new()
+	{
+		this.master = new Axi4LiteMaster()
+		this.target = new Axi4LiteTestSlave(this.master)
+	}
+
+	/**
+	 * Verifies success when readiness arrives on the seventh evaluation.
+	 */
+	@Test
+	fn CountsTheConfiguredDeadlineExactly()
+	{
+		target.Clear()
+		target.ConfigureDelays(0, 0, 0, 0, 0)
+		master.SetTimeoutTicks(7 as uint)
+		assert master.TryRead32(0x00 as uint) == true
+		assert master.LastTimedOut() == false
+	}
+}

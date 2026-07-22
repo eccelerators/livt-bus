@@ -47,11 +47,11 @@ component Axi4LiteTestMasterTest
 
 		slave.ConfigureResponses(0b10, 0b11)
 		var writeCompleted = master.TryWrite32(0x00000010 as uint, 0x01020304 as uint, 0b1111)
-		assert writeCompleted
+		assert writeCompleted == true
 		assert master.LastResponse() == 0b10
 
 		var readCompleted = master.TryRead32(0x00000010 as uint)
-		assert readCompleted
+		assert readCompleted == true
 		assert master.LastReadValue() == (0x01020304 as uint)
 		assert master.LastResponse() == 0b11
 		assert master.awvalid == 0b0
@@ -66,11 +66,11 @@ component Axi4LiteTestMasterTest
 
 		var completed = master.TryWrite32(0x00000014 as uint, 0x55AA55AA as uint, 0b1111)
 		assert completed == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 
 		slave.ConfigureDelays(0, 0, 0, 0, 0)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00000014 as uint)
+		assert master.TryRead32(0x00000014 as uint) == true
 		assert master.LastReadValue() == (0x55AA55AA as uint)
 		assert master.LastTimedOut() == false
 	}

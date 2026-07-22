@@ -1,0 +1,36 @@
+namespace Livt.Bus.Tests.Axi4Lite
+
+using Livt.Bus.Axi4Lite
+using Livt.Bus.Axi4Lite.Testing
+
+/**
+ * Verifies AXI4-Lite timeout immediately before the acceptance boundary.
+ */
+@Test
+component Axi4LiteTimeoutBeforeBoundaryTest
+{
+	master: Axi4LiteMaster
+	target: Axi4LiteTestSlave
+
+	/**
+	 * Creates a fresh fixture for the failing boundary.
+	 */
+	new()
+	{
+		this.master = new Axi4LiteMaster()
+		this.target = new Axi4LiteTestSlave(this.master)
+	}
+
+	/**
+	 * Verifies timeout after six stalls, one evaluation before readiness.
+	 */
+	@Test
+	fn TimesOutImmediatelyBeforeAcceptance()
+	{
+		target.Clear()
+		target.ConfigureDelays(0, 0, 0, 0, 0)
+		master.SetTimeoutTicks(6 as uint)
+		assert master.TryRead32(0x00 as uint) == false
+		assert master.LastTimedOut() == true
+	}
+}

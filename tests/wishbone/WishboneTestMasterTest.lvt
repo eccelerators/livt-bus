@@ -44,11 +44,11 @@ component WishboneTestMasterTest
 		master.SetTimeoutTicks(2 as uint)
 		slave.ConfigureAckDelay(20 as uint)
 		assert master.TryRead32(0x00 as uint) == false
-		assert master.LastTimedOut()
+		assert master.LastTimedOut() == true
 		assert master.LastResponse() == WishboneTestMaster.RESPONSE_SLVERR
 		slave.ConfigureAckDelay(0 as uint)
 		master.SetTimeoutTicks(10 as uint)
-		assert master.TryRead32(0x00 as uint)
+		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastResponse() == WishboneTestMaster.RESPONSE_OKAY
 		assert master.LastTimedOut() == false
 	}

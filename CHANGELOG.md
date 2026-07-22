@@ -18,7 +18,8 @@
 - Expose `LastTimedOut()` on every bridge and verify reuse after timeout,
   including independent AXI `AW`, `W`, `B`, `AR`, and `R` stalls.
 - Make configured master and bridge timeouts count exactly the requested number
-  of consecutive stalled evaluations.
+  of consecutive stalled evaluations, with adjacent failure/success boundary
+  regressions for every reusable master.
 - Keep reusable and testing AXI4-Lite/Avalon masters protocol-compliant after a
   local timeout by draining the outstanding transaction before returning.
 - Add normalized `LastResponse()` status to `IMemoryMappedMaster32`, including
