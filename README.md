@@ -5,7 +5,7 @@ contracts, protocol bridges, and verification components for Livt designs.
 Applications can use the masters and bridges as normal components, while tests
 can drive the same bus contracts through source-level function calls.
 
-The 0.3.0 package supports three commonly used register buses:
+The 1.0.1 package supports three commonly used register buses:
 
 - `Livt.Bus.Axi4Lite.Axi4LiteMaster`: reusable AXI4-Lite transaction master.
 - `Livt.Bus.Avalon.AvalonMaster`: reusable non-pipelined Avalon-MM master.
@@ -25,7 +25,7 @@ The 0.3.0 package supports three commonly used register buses:
 
 ```toml
 [dependencies]
-Livt.Bus = "0.3.0"
+Livt.Bus = "1.0.1"
 ```
 
 `Livt.Bus` is part of the official Livt base-library package set. Depend on it
@@ -147,7 +147,7 @@ master.SetTimeoutTicks(timeoutTicks)
 ```
 
 Assigning the master to another context automatically gives duration-based
-timeouts the correct tick count for that context. Livt.Bus 0.3.0 requires the
+timeouts the correct tick count for that context. Livt.Bus 1.0.1 requires the
 Livt v0.0.10 compiler or newer.
 
 ## 🧪 Build and Test
