@@ -22,14 +22,15 @@ component AvalonTimeoutBoundaryTest
 	}
 
 	/**
-	 * Verifies success when acceptance arrives on the seventh evaluation.
+	 * Verifies success when this scheduled target accepts on the sixth evaluation.
+	 * The native edge scoreboard separately checks the protocol-level deadline.
 	 */
 	@Test
 	fn CountsTheConfiguredDeadlineExactly()
 	{
 		target.Clear()
 		target.Configure(0 as uint, 0b00)
-		master.SetTimeoutTicks(7 as uint)
+		master.SetTimeoutTicks(6 as uint)
 		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastTimedOut() == false
 	}

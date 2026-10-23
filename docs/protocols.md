@@ -26,6 +26,37 @@ HxS integrations:
 This profile does not include optional burst, pending-read, or separate
 read-data-valid signals.
 
+### Master acceptance and completion
+
+`AvalonMaster` and `AvalonTestMaster` share the same cycle contract. Each API
+call offers one transfer. At their entity pins, `read` or `write` remains high
+with stable address, byte enables and write data until a rising edge with
+`waitrequest = 0`. That edge captures the response/read data and lowers the
+request; no extra finish cycle is exposed on the bus. Byte enables return to
+zero. A dedicated clocked process owns these registers, with combinational
+connections to the ports. Scheduled API calls submit work through a mailbox;
+their setup/completion latency is not additional bus traffic.
+
+The timeout counts stalled bus sampling edges, starting at the first edge
+after the request is asserted. Acceptance takes priority on the deadline edge.
+Zero times out on the first stalled edge, but allows immediate acceptance.
+Once timed out, the request remains stable until accepted, then the call returns
+`false`; late read data/status is discarded. Reset cancels pending work and
+clears request and mailbox state. Calls and status inspection should be serialized
+by the application; the status getters describe the most recent transaction.
+
+Direct native checks are available in `livt-gen-vhdl-verification` via
+`make test-avalon-masters`. They cover both masters in debug/release against an
+edge scoreboard and a generated HxS read-function target. These checks establish
+functional and cycle behavior, not FPGA resource use or routed timing.
+
+`make test-avalon-composed` in the same verification repository checks generated
+parent connections to an HxS target, both directly and through a combinational
+signal adapter. These static signal connections preserve the accepting edge;
+they are not implicit pipeline stages. Registering either direction requires a
+protocol-aware adapter. Do not compensate for incorrect routing by adding dead
+cycles to a slave or suppressing valid consecutive transfers.
+
 ## Wishbone Classic 32
 
 `IWishbone32Master` is an ACK-based Wishbone Classic single-transfer profile:
