@@ -9,16 +9,16 @@ using Livt.Bus.Wishbone.Testing
 @Test
 component WishboneTimeoutBeforeBoundaryTest
 {
-	master: WishboneMaster
-	target: WishboneTestSlave
+	master: WishboneMaster32
+	target: WishboneTestSlave32
 
 	/**
 	 * Creates a fresh fixture for the failing boundary.
 	 */
 	new()
 	{
-		this.master = new WishboneMaster()
-		this.target = new WishboneTestSlave(this.master)
+		this.master = new WishboneMaster32()
+		this.target = new WishboneTestSlave32(this.master)
 	}
 
 	/**

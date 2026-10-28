@@ -11,20 +11,20 @@ using Livt.Bus.Wishbone.Testing
 component WishboneToAxi4LiteBridgeTest
 {
 	// Wishbone transaction source under test.
-	upstream: WishboneTestMaster
+	upstream: WishboneTestMaster32
 	// Bridge subject under test.
 	bridge: WishboneToAxi4LiteBridge32
 	// Configurable AXI4-Lite target.
-	target: Axi4LiteTestSlave
+	target: Axi4LiteTestSlave32
 
 	/**
 	 * Connects the Wishbone source, bridge, and AXI4-Lite target.
 	 */
 	new()
 	{
-		this.upstream = new WishboneTestMaster()
+		this.upstream = new WishboneTestMaster32()
 		this.bridge = new WishboneToAxi4LiteBridge32(this.upstream)
-		this.target = new Axi4LiteTestSlave(this.bridge)
+		this.target = new Axi4LiteTestSlave32(this.bridge)
 	}
 
 	/**

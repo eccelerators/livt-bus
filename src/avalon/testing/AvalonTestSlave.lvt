@@ -3,16 +3,21 @@ namespace Livt.Bus.Avalon.Testing
 using Livt.Bus.Avalon
 
 /**
- * Configurable non-pipelined Avalon-MM register model for master tests.
+ * Configurable non-pipelined Avalon-MM mirrored 16-word register model for master tests.
  */
-component AvalonTestSlave
+component AvalonTestSlave<AddressWidth: int = 32, DataWidth: int = 32>
 {
-	bus: IAvalon32Master
-	registers: uint[16]
+    const BYTE_COUNT: int = DataWidth / 8
+    static assert DataWidth == 32 || DataWidth == 64 || DataWidth == 128, "Invalid DataWidth"
+    public observedAddress: out Logic[AddressWidth]
+    public acceptedWrites: out uint
+
+	bus: IAvalonMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>
+	registers: Logic[16, DataWidth]
 	requestDelay: uint
 	configuredResponse: Logic[2]
 
-	new(bus: flip IAvalon32Master)
+	new(bus: flip IAvalonMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>)
 	{
 		this.bus = bus
 		this.bus.readdata = 0x00000000
@@ -34,7 +39,7 @@ component AvalonTestSlave
 	}
 
 	/**
-	 * Clears all sixteen 32-bit words in the target model.
+	 * Clears all sixteen native-width words in the target model.
 	 */
 	public fn Clear()
 	{
@@ -49,7 +54,7 @@ component AvalonTestSlave
 	{
 		var elapsed: uint = 0
 		var registerIndex: int = 0
-		var nextValue: uint = 0
+		var nextValue: Logic[DataWidth] = 0
 
 		state Idle {
 			this.bus.waitrequest = 0b1
@@ -64,26 +69,17 @@ component AvalonTestSlave
 
 		state WaitForAcceptance {
 			if (elapsed >= requestDelay) {
-				registerIndex = ((this.bus.address as uint) >> 2) as int
+				this.observedAddress = this.bus.address
+                registerIndex = (((this.bus.address & ((16 * BYTE_COUNT - 1) as Logic[AddressWidth])) as uint) / (BYTE_COUNT as uint)) as int
 				if (this.bus.write == 0b1 && registerIndex >= 0 && registerIndex < 16) {
 					nextValue = registers[registerIndex]
-					if (this.bus.byteenable[0] == 0b1) {
-						nextValue = (nextValue & (0xFFFFFF00 as uint)) | ((this.bus.writedata as uint) & (0x000000FF as uint))
-					}
-					if (this.bus.byteenable[1] == 0b1) {
-						nextValue = (nextValue & (0xFFFF00FF as uint)) | ((this.bus.writedata as uint) & (0x0000FF00 as uint))
-					}
-					if (this.bus.byteenable[2] == 0b1) {
-						nextValue = (nextValue & (0xFF00FFFF as uint)) | ((this.bus.writedata as uint) & (0x00FF0000 as uint))
-					}
-					if (this.bus.byteenable[3] == 0b1) {
-						nextValue = (nextValue & (0x00FFFFFF as uint)) | ((this.bus.writedata as uint) & (0xFF000000 as uint))
-					}
-					registers[registerIndex] = nextValue
+					nextValue = this.MergeBytes(nextValue, this.bus.writedata, this.bus.byteenable)
+                this.acceptedWrites = this.acceptedWrites + 1
+                registers[registerIndex] = nextValue
 				}
 				if (this.bus.read == 0b1) {
 					if (registerIndex >= 0 && registerIndex < 16) {
-						this.bus.readdata = registers[registerIndex] as Logic[32]
+						this.bus.readdata = registers[registerIndex] as Logic[DataWidth]
 					}
 					else {
 						this.bus.readdata = 0x00000000
@@ -99,9 +95,28 @@ component AvalonTestSlave
 			}
 		}
 
-		state Accepted {
-			this.bus.waitrequest = 0b1
-			goto Idle
-		}
+        state Accepted {
+            // This fixture models a single outstanding transaction. A delegated
+            // request can remain asserted while its response travels upstream.
+            if (this.bus.read == 0b0 && this.bus.write == 0b0) {
+                this.bus.waitrequest = 0b1
+                goto Idle
+            } else {
+                goto Accepted
+            }
+        }
 	}
+
+    private inline fn MergeBytes[](previous: Logic[DataWidth], data: Logic[DataWidth], enables: Logic[BYTE_COUNT]) Logic[DataWidth] {
+        var result = previous
+        for (var lane = 0; lane < 16; lane++) {
+            if (lane < BYTE_COUNT) {
+              if (enables[lane] == 0b1) {
+                var mask = (0xFF as Logic[DataWidth]) << (lane * 8)
+                result = (result & ~mask) | (data & mask)
+              }
+            }
+        }
+        return result
+    }
 }

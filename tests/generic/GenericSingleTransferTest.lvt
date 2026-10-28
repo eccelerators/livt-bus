@@ -1,0 +1,99 @@
+namespace Livt.Bus.Tests.Generic
+using Livt.Bus.Axi4Lite
+using Livt.Bus.Axi4Lite.Testing
+using Livt.Bus.Wishbone
+using Livt.Bus.Wishbone.Testing
+
+/** Always-ready target counts physical accepted beats, independently of master methods. */
+component AlwaysReadyAxiTarget {
+    bus: IAxi4LiteMaster<Logic[32],Logic[32],Logic[4]>
+    public readAddresses: out uint = 0
+    public writeAddresses: out uint = 0
+    public writeDataBeats: out uint = 0
+    ar: logic
+    aw: logic
+    w: logic
+    rr: logic
+    br: logic
+    readPending: logic = 0b0
+    writePending: logic = 0b0
+    new(bus: flip IAxi4LiteMaster<Logic[32],Logic[32],Logic[4]>) { this.bus = bus }
+    process Connect[]() {
+        this.bus.arready = 0b1
+        this.bus.awready = 0b1
+        this.bus.wready = 0b1
+        this.bus.rvalid = this.readPending
+        this.bus.rdata = 0 as Logic[32]
+        this.bus.rresp = 0b00
+        this.bus.bvalid = this.writePending
+        this.bus.bresp = 0b00
+        this.ar = this.bus.arvalid
+        this.aw = this.bus.awvalid
+        this.w = this.bus.wvalid
+        this.rr = this.bus.rready
+        this.br = this.bus.bready
+    }
+    process Count() {
+        var gotAddress: bool = false
+        var gotData: bool = false
+        state Sample {
+            if (this.readPending == 0b1 && this.rr == 0b1) { this.readPending = 0b0 }
+            if (this.writePending == 0b1 && this.br == 0b1) { this.writePending = 0b0 }
+            if (this.ar == 0b1) { this.readAddresses = this.readAddresses + 1; this.readPending = 0b1 }
+            if (this.aw == 0b1) { this.writeAddresses = this.writeAddresses + 1; gotAddress = true }
+            if (this.w == 0b1) { this.writeDataBeats = this.writeDataBeats + 1; gotData = true }
+            if (gotAddress && gotData) { this.writePending = 0b1; gotAddress = false; gotData = false }
+            goto Sample
+        }
+    }
+}
+component AlwaysReadyWishboneTarget {
+    bus: IWishboneMaster<Logic[32],Logic[32],Logic[4]>
+    public reads: out uint = 0
+    public writes: out uint = 0
+    active: logic
+    write: logic
+    new(bus: flip IWishboneMaster<Logic[32],Logic[32],Logic[4]>) { this.bus = bus }
+    process Connect[]() {
+        this.bus.ack = this.bus.cyc & this.bus.stb
+        this.bus.datout = 0 as Logic[32]
+        this.active = this.bus.cyc & this.bus.stb
+        this.write = this.bus.we
+    }
+    process Count() {
+        state Sample {
+            if (this.active == 0b1) {
+                if (this.write == 0b1) { this.writes = this.writes + 1 }
+                else { this.reads = this.reads + 1 }
+            }
+            goto Sample
+        }
+    }
+}
+@Test component Axi4LiteSingleTransferTest {
+    master: Axi4LiteTestMaster
+    target: AlwaysReadyAxiTarget
+    new() { this.master = new Axi4LiteTestMaster(); this.target = new AlwaysReadyAxiTarget(this.master) }
+    @Test fn CountsPhysicalHandshakesExactlyOnce() {
+        master.WriteWord(0 as Logic[32],0x12 as Logic[32])
+        master.VerifyWord(0 as Logic[32],0 as Logic[32])
+        master.WriteWord(4 as Logic[32],0x34 as Logic[32])
+        master.VerifyWord(4 as Logic[32],0 as Logic[32])
+        assert target.writeAddresses == (2 as uint)
+        assert target.writeDataBeats == (2 as uint)
+        assert target.readAddresses == (2 as uint)
+    }
+}
+@Test component WishboneSingleTransferTest {
+    master: WishboneTestMaster
+    target: AlwaysReadyWishboneTarget
+    new() { this.master = new WishboneTestMaster(); this.target = new AlwaysReadyWishboneTarget(this.master) }
+    @Test fn CountsPhysicalHandshakesExactlyOnce() {
+        master.WriteWord(0 as Logic[32],0x12 as Logic[32])
+        master.VerifyWord(0 as Logic[32],0 as Logic[32])
+        master.WriteWord(4 as Logic[32],0x34 as Logic[32])
+        master.VerifyWord(4 as Logic[32],0 as Logic[32])
+        assert target.reads == (2 as uint)
+        assert target.writes == (2 as uint)
+    }
+}

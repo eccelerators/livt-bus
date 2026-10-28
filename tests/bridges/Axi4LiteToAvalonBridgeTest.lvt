@@ -11,20 +11,20 @@ using Livt.Bus.Bridges
 component Axi4LiteToAvalonBridgeTest
 {
 	// AXI4-Lite transaction source under test.
-	upstream: Axi4LiteTestMaster
+	upstream: Axi4LiteTestMaster32
 	// Bridge subject under test.
 	bridge: Axi4LiteToAvalonBridge32
 	// Configurable Avalon-MM target.
-	target: AvalonTestSlave
+	target: AvalonTestSlave32
 
 	/**
 	 * Connects the AXI4-Lite source, bridge, and Avalon target.
 	 */
 	new()
 	{
-		this.upstream = new Axi4LiteTestMaster()
+		this.upstream = new Axi4LiteTestMaster32()
 		this.bridge = new Axi4LiteToAvalonBridge32(this.upstream)
-		this.target = new AvalonTestSlave(this.bridge)
+		this.target = new AvalonTestSlave32(this.bridge)
 	}
 
 	/**

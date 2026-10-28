@@ -9,16 +9,16 @@ using Livt.Bus.Axi4Lite.Testing
 @Test
 component Axi4LiteTimeoutBoundaryTest
 {
-	master: Axi4LiteMaster
-	target: Axi4LiteTestSlave
+	master: Axi4LiteMaster32
+	target: Axi4LiteTestSlave32
 
 	/**
 	 * Creates a fresh fixture for the successful boundary.
 	 */
 	new()
 	{
-		this.master = new Axi4LiteMaster()
-		this.target = new Axi4LiteTestSlave(this.master)
+		this.master = new Axi4LiteMaster32()
+		this.target = new Axi4LiteTestSlave32(this.master)
 	}
 
 	/**

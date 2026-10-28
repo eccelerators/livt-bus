@@ -1,0 +1,11 @@
+namespace Livt.Bus
+/** Full-width byte-addressed transactions. Data and addresses never pass through uint. */
+interface IMemoryMappedMaster<Address, Data, ByteEnable> {
+    fn SetTimeoutTicks(timeoutTicks: uint)
+    fn GetTimeoutTicks() uint
+    fn TryWrite(address: Address, value: Data, byteEnable: ByteEnable) bool
+    fn TryRead(address: Address) bool
+    fn LastReadValue() Data
+    fn LastResponse() Logic[2]
+    fn LastTimedOut() bool
+}

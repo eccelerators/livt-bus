@@ -162,15 +162,6 @@ component WishboneToAvalonBridge32 : IAvalon32Master
 			}
 		}
 
-		state WaitForRelease {
-			if (this.upstream.cyc == 0b0 || this.upstream.stb == 0b0) {
-				goto Idle
-			}
-			else {
-				goto WaitForRelease
-			}
-		}
-
 		state RecoverTransfer {
 			if (downstreamAccepted == false && this.waitrequest == 0b0) {
 				this.write = 0b0

@@ -5,10 +5,15 @@ using Livt.Bus.Axi4Lite
 /**
  * Configurable AXI4-Lite slave used to verify the public test master.
  */
-component Axi4LiteTestSlave
+component Axi4LiteTestSlave<AddressWidth: int = 32, DataWidth: int = 32>
 {
-	bus: IAxi4Lite32Master
-	registers: uint[16]
+    const BYTE_COUNT: int = DataWidth / 8
+    static assert DataWidth == 32 || DataWidth == 64 || DataWidth == 128, "Invalid DataWidth"
+    public observedAddress: out Logic[AddressWidth]
+    public acceptedWrites: out uint
+
+	bus: IAxi4LiteMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>
+	registers: Logic[16, DataWidth]
 	awDelay: uint
 	wDelay: uint
 	bDelay: uint
@@ -17,7 +22,7 @@ component Axi4LiteTestSlave
 	configuredWriteResponse: Logic[2]
 	configuredReadResponse: Logic[2]
 
-	new(bus: flip IAxi4Lite32Master)
+	new(bus: flip IAxi4LiteMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>)
 	{
 		this.bus = bus
 		this.bus.awready = 0b0
@@ -64,7 +69,7 @@ component Axi4LiteTestSlave
 	}
 
 	/**
-	 * Clears all sixteen 32-bit words in the target model.
+	 * Clears all sixteen native-width words in the target model.
 	 */
 	public fn Clear()
 	{
@@ -84,12 +89,12 @@ component Axi4LiteTestSlave
 		var rTicks: uint = 0
 		var addressAccepted: bool = false
 		var dataAccepted: bool = false
-		var capturedWriteAddress: uint = 0
-		var capturedWriteData: uint = 0
-		var capturedWriteStrobe: Logic[4] = 0b0000
-		var capturedReadAddress: uint = 0
+		var capturedWriteAddress: Logic[AddressWidth] = 0
+		var capturedWriteData: Logic[DataWidth] = 0
+		var capturedWriteStrobe: Logic[BYTE_COUNT] = 0b0000
+		var capturedReadAddress: Logic[AddressWidth] = 0
 		var registerIndex: int = 0
-		var nextValue: uint = 0
+		var nextValue: Logic[DataWidth] = 0
 
 		state Idle {
 			this.bus.awready = 0b0
@@ -120,7 +125,7 @@ component Axi4LiteTestSlave
 			if (addressAccepted == false) {
 				if (awTicks >= awDelay) {
 					if (this.bus.awready == 0b1 && this.bus.awvalid == 0b1) {
-						capturedWriteAddress = this.bus.awaddr as uint
+						capturedWriteAddress = this.bus.awaddr as Logic[AddressWidth]
 						addressAccepted = true
 						this.bus.awready = 0b0
 					}
@@ -135,7 +140,7 @@ component Axi4LiteTestSlave
 			if (dataAccepted == false) {
 				if (wTicks >= wDelay) {
 					if (this.bus.wready == 0b1 && this.bus.wvalid == 0b1) {
-						capturedWriteData = this.bus.wdata as uint
+						capturedWriteData = this.bus.wdata as Logic[DataWidth]
 						capturedWriteStrobe = this.bus.wstrb
 						dataAccepted = true
 						this.bus.wready = 0b0
@@ -159,22 +164,13 @@ component Axi4LiteTestSlave
 		state WriteApply {
 			this.bus.awready = 0b0
 			this.bus.wready = 0b0
-			registerIndex = (capturedWriteAddress >> 2) as int
+			this.observedAddress = capturedWriteAddress
+                registerIndex = (((capturedWriteAddress & ((16 * BYTE_COUNT - 1) as Logic[AddressWidth])) as uint) / (BYTE_COUNT as uint)) as int
 			if (registerIndex >= 0 && registerIndex < 16) {
 				nextValue = registers[registerIndex]
-				if (capturedWriteStrobe[0] == 0b1) {
-					nextValue = (nextValue & (0xFFFFFF00 as uint)) | (capturedWriteData & (0x000000FF as uint))
-				}
-				if (capturedWriteStrobe[1] == 0b1) {
-					nextValue = (nextValue & (0xFFFF00FF as uint)) | (capturedWriteData & (0x0000FF00 as uint))
-				}
-				if (capturedWriteStrobe[2] == 0b1) {
-					nextValue = (nextValue & (0xFF00FFFF as uint)) | (capturedWriteData & (0x00FF0000 as uint))
-				}
-				if (capturedWriteStrobe[3] == 0b1) {
-					nextValue = (nextValue & (0x00FFFFFF as uint)) | (capturedWriteData & (0xFF000000 as uint))
-				}
-				registers[registerIndex] = nextValue
+				nextValue = this.MergeBytes(nextValue, capturedWriteData, capturedWriteStrobe)
+                this.acceptedWrites = this.acceptedWrites + 1
+                registers[registerIndex] = nextValue
 			}
 			bTicks = 0
 			goto WriteResponseDelay
@@ -206,7 +202,7 @@ component Axi4LiteTestSlave
 			if (arTicks >= arDelay) {
 				this.bus.arready = 0b1
 				if (this.bus.arvalid == 0b1) {
-					capturedReadAddress = this.bus.araddr as uint
+					capturedReadAddress = this.bus.araddr as Logic[AddressWidth]
 					rTicks = 0
 					goto ReadDataDelay
 				}
@@ -223,9 +219,10 @@ component Axi4LiteTestSlave
 		state ReadDataDelay {
 			this.bus.arready = 0b0
 			if (rTicks >= rDelay) {
-				registerIndex = (capturedReadAddress >> 2) as int
+				this.observedAddress = capturedReadAddress
+                registerIndex = (((capturedReadAddress & ((16 * BYTE_COUNT - 1) as Logic[AddressWidth])) as uint) / (BYTE_COUNT as uint)) as int
 				if (registerIndex >= 0 && registerIndex < 16) {
-					this.bus.rdata = registers[registerIndex] as Logic[32]
+					this.bus.rdata = registers[registerIndex] as Logic[DataWidth]
 				}
 				else {
 					this.bus.rdata = 0x00000000
@@ -250,4 +247,17 @@ component Axi4LiteTestSlave
 			}
 		}
 	}
+
+    private inline fn MergeBytes[](previous: Logic[DataWidth], data: Logic[DataWidth], enables: Logic[BYTE_COUNT]) Logic[DataWidth] {
+        var result = previous
+        for (var lane = 0; lane < 16; lane++) {
+            if (lane < BYTE_COUNT) {
+              if (enables[lane] == 0b1) {
+                var mask = (0xFF as Logic[DataWidth]) << (lane * 8)
+                result = (result & ~mask) | (data & mask)
+              }
+            }
+        }
+        return result
+    }
 }

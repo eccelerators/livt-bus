@@ -5,13 +5,13 @@ using Livt.Bus.Avalon.Testing
 @Test
 component AvalonTestMasterTest
 {
-	master: AvalonTestMaster
-	slave: AvalonTestSlave
+	master: AvalonTestMaster32
+	slave: AvalonTestSlave32
 
 	new()
 	{
-		this.master = new AvalonTestMaster()
-		this.slave = new AvalonTestSlave(this.master)
+		this.master = new AvalonTestMaster32()
+		this.slave = new AvalonTestSlave32(this.master)
 	}
 
 	@Test

@@ -5,8 +5,13 @@ using Livt.Bus
 /**
  * Reusable AXI4-Lite transaction master with independent channel handshakes.
  */
-component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
+component Axi4LiteMaster<AddressWidth: int = 32, DataWidth: int = 32, AllowNonStandardDataWidth: bool = false, CheckAlignment: bool = true> : IAxi4LiteMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>, IMemoryMappedMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>
 {
+    const BYTE_COUNT: int = DataWidth / 8
+    static assert DataWidth == 32 || DataWidth == 64 || DataWidth == 128, "DataWidth must be 32, 64 or 128"
+    static assert AddressWidth >= Bits.RequiredFor(DataWidth / 8 - 1) && AddressWidth <= 64, "AddressWidth cannot represent byte lanes or exceeds 64"
+    static assert DataWidth != 128 || AllowNonStandardDataWidth, "128-bit AXI-Lite-shaped transfers require AllowNonStandardDataWidth=true; they are not standard AXI4-Lite"
+
 	/**
 	 * AXI response code for a successful normal access.
 	 */
@@ -24,12 +29,12 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	 */
 	public const RESPONSE_DECERR: Logic[2] = 0b11
 	/**
-	 * Byte-enable value selecting all four data lanes.
+	 * Byte-enable value selecting all native data lanes.
 	 */
-	public const ALL_BYTES: Logic[4] = 0b1111
+	public const ALL_BYTES: Logic[BYTE_COUNT] = ~(0 as Logic[BYTE_COUNT])
 
 	timeoutTicks: uint
-	lastReadValue: uint
+	lastReadValue: Logic[DataWidth]
 	lastResponse: Logic[2]
 	lastTimedOut: bool
 
@@ -72,7 +77,7 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	/**
 	 * Returns the data captured by the most recently completed read.
 	 */
-	override fn LastReadValue() uint
+	override fn LastReadValue() Logic[DataWidth]
 	{
 		return lastReadValue
 	}
@@ -98,8 +103,9 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	 * Returns true after a response handshake; inspect LastResponse for its status.
 	 * After a timeout, the call drains the outstanding transaction before returning.
 	 */
-	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	override fn TryWrite(address: Logic[AddressWidth], value: Logic[DataWidth], byteEnable: Logic[BYTE_COUNT]) bool
 	{
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
 		var addressAccepted: bool = false
 		var dataAccepted: bool = false
 		var elapsed: uint = 0
@@ -112,10 +118,10 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 			dataAccepted = false
 			elapsed = 0
 			successful = false
-			this.awaddr = address as Logic[32]
+			this.awaddr = address as Logic[AddressWidth]
 			this.awprot = 0b000
 			this.awvalid = 0b1
-			this.wdata = value as Logic[32]
+			this.wdata = value as Logic[DataWidth]
 			this.wstrb = byteEnable
 			this.wvalid = 0b1
 			this.bready = 0b0
@@ -210,8 +216,9 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 	 * Returns true after a data handshake; inspect LastResponse for its status.
 	 * After a timeout, the call drains the outstanding transaction before returning.
 	 */
-	override fn TryRead32(address: uint) bool
+	override fn TryRead(address: Logic[AddressWidth]) bool
 	{
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
 		var elapsed: uint = 0
 		var successful: bool = false
 
@@ -221,7 +228,7 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 			lastTimedOut = false
 			elapsed = 0
 			successful = false
-			this.araddr = address as Logic[32]
+			this.araddr = address as Logic[AddressWidth]
 			this.arprot = 0b000
 			this.arvalid = 0b1
 			this.rready = 0b0
@@ -248,7 +255,7 @@ component Axi4LiteMaster : IAxi4Lite32Master, IMemoryMappedMaster32
 
 		state Data {
 			if (this.rvalid == 0b1) {
-				lastReadValue = this.rdata as uint
+				lastReadValue = this.rdata as Logic[DataWidth]
 				lastResponse = this.rresp
 				goto Complete
 			}

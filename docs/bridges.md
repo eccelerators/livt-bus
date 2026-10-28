@@ -22,7 +22,7 @@ target-side master interface:
 using Livt.Bus.Avalon
 using Livt.Bus.Bridges
 
-this.source = new AvalonMaster()
+this.source = new AvalonMaster32()
 this.bridge = new AvalonToWishboneBridge32(this.source)
 this.target = new WishbonePeripheral(this.bridge)
 ```

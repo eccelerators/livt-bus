@@ -6,13 +6,13 @@ using Livt.Bus.Avalon.Testing
 @Test
 component AvalonMasterTest
 {
-	master: AvalonMaster
-	slave: AvalonTestSlave
+	master: AvalonMaster32
+	slave: AvalonTestSlave32
 
 	new()
 	{
-		this.master = new AvalonMaster()
-		this.slave = new AvalonTestSlave(this.master)
+		this.master = new AvalonMaster32()
+		this.slave = new AvalonTestSlave32(this.master)
 	}
 
 	@Test
@@ -27,7 +27,7 @@ component AvalonMasterTest
 		assert master.TryWrite32(0x08 as uint, 0xAA00CC00 as uint, 0b1010) == true
 		assert master.TryRead32(0x08 as uint) == true
 		assert master.LastReadValue() == (0xAA22CC44 as uint)
-		assert master.LastResponse() == AvalonMaster.RESPONSE_OKAY
+		assert master.LastResponse() == AvalonMaster32.RESPONSE_OKAY
 
 		slave.Configure(0 as uint, 0b10)
 		assert master.TryRead32(0x08 as uint) == true

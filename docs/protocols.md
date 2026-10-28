@@ -28,7 +28,7 @@ read-data-valid signals.
 
 ### Master acceptance and completion
 
-`AvalonMaster` and `AvalonTestMaster` share the same cycle contract. Each API
+`AvalonMaster32` and `AvalonTestMaster32` share the same cycle contract. Each API
 call offers one transfer. At their entity pins, `read` or `write` remains high
 with stable address, byte enables and write data until a rising edge with
 `waitrequest = 0`. That edge captures the response/read data and lowers the
@@ -45,17 +45,13 @@ Once timed out, the request remains stable until accepted, then the call returns
 clears request and mailbox state. Calls and status inspection should be serialized
 by the application; the status getters describe the most recent transaction.
 
-Direct native checks are available in `livt-gen-vhdl-verification` via
-`make test-avalon-masters`. They cover both masters in debug/release against an
-edge scoreboard and a generated HxS read-function target. These checks establish
-functional and cycle behavior, not FPGA resource use or routed timing.
-
-`make test-avalon-composed` in the same verification repository checks generated
-parent connections to an HxS target, both directly and through a combinational
-signal adapter. These static signal connections preserve the accepting edge;
-they are not implicit pipeline stages. Registering either direction requires a
-protocol-aware adapter. Do not compensate for incorrect routing by adding dead
-cycles to a slave or suppressing valid consecutive transfers.
+The package tests cover delayed and immediate acceptance, timeout boundaries,
+masked transfers, response propagation and repeated transactions. These checks
+establish functional and cycle behavior, not FPGA resource use or routed timing.
+Static parent connections preserve the accepting edge; they are not implicit
+pipeline stages. Registering either direction requires a protocol-aware adapter.
+Do not compensate for incorrect routing by adding dead cycles to a slave or
+suppressing valid consecutive transfers.
 
 ## Wishbone Classic 32
 

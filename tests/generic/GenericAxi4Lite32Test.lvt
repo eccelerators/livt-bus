@@ -1,0 +1,79 @@
+namespace Livt.Bus.Tests.Generic
+using Livt.Bus.Axi4Lite.Testing
+/** Native-width transfers, high address/data bits, byte lanes, errors and recovery. */
+@Test
+component GenericAxi4Lite32Test {
+    const LANES: int = 32 / 8
+    master: Axi4LiteTestMaster
+    target: Axi4LiteTestSlave
+    new() {
+        this.master = new Axi4LiteTestMaster()
+        this.target = new Axi4LiteTestSlave(this.master)
+    }
+    @Test fn NativeTransfersAndRecovery() {
+        target.Clear()
+        target.ConfigureDelays(1 as uint, 2 as uint, 2 as uint, 1 as uint, 2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        var address = (1 as Logic[32]) << 4
+        var value = ((0xA5 as Logic[32]) << 24) | (0x1234 as Logic[32])
+        var expected = ((0xBC as Logic[32]) << 24) | (0x1234 as Logic[32])
+        master.WriteWord(address, value)
+        master.VerifyWord(address, value)
+        assert target.observedAddress == address
+        assert target.acceptedWrites == (1 as uint)
+        master.Write8(address | (3 as Logic[32]), 0xBC as byte)
+        master.VerifyWord(address, expected)
+        assert target.acceptedWrites == (2 as uint)
+        assert master.Read8(address | (3 as Logic[32])) == (0xBC as byte)
+        master.WriteMaskedWord(address, ~(0 as Logic[32]), 0 as Logic[LANES])
+        master.VerifyWord(address, expected)
+        assert target.acceptedWrites == (3 as uint)
+        target.ConfigureResponses(0b10,0b10)
+        assert master.TryRead(address) == true
+        assert master.LastResponse() == 0b10
+        assert master.TryWrite(address, expected, ~(0 as Logic[LANES])) == true
+        assert master.LastResponse() == 0b10
+        target.ConfigureResponses(0b00,0b00)
+        assert master.LastTimedOut() == false
+        target.ConfigureDelays(10 as uint, 0 as uint, 0 as uint, 0 as uint, 0 as uint)
+        master.SetTimeoutTicks(2 as uint)
+        assert master.TryWrite(address, expected, ~(0 as Logic[LANES])) == false
+        assert master.LastTimedOut() == true
+        Simulation.Wait(20)
+        target.ConfigureDelays(1 as uint, 2 as uint, 2 as uint, 1 as uint, 2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        master.VerifyWord(address, expected)
+        target.ConfigureDelays(0 as uint, 10 as uint, 0 as uint, 0 as uint, 0 as uint)
+        master.SetTimeoutTicks(2 as uint)
+        assert master.TryWrite(address, expected, ~(0 as Logic[LANES])) == false
+        assert master.LastTimedOut() == true
+        Simulation.Wait(20)
+        target.ConfigureDelays(1 as uint, 2 as uint, 2 as uint, 1 as uint, 2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        master.VerifyWord(address, expected)
+        target.ConfigureDelays(0 as uint, 0 as uint, 10 as uint, 0 as uint, 0 as uint)
+        master.SetTimeoutTicks(2 as uint)
+        assert master.TryWrite(address, expected, ~(0 as Logic[LANES])) == false
+        assert master.LastTimedOut() == true
+        Simulation.Wait(20)
+        target.ConfigureDelays(1 as uint, 2 as uint, 2 as uint, 1 as uint, 2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        master.VerifyWord(address, expected)
+        target.ConfigureDelays(0 as uint, 0 as uint, 0 as uint, 10 as uint, 0 as uint)
+        master.SetTimeoutTicks(2 as uint)
+        assert master.TryRead(address) == false
+        assert master.LastTimedOut() == true
+        Simulation.Wait(20)
+        target.ConfigureDelays(1 as uint, 2 as uint, 2 as uint, 1 as uint, 2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        master.VerifyWord(address, expected)
+        target.ConfigureDelays(0 as uint, 0 as uint, 0 as uint, 0 as uint, 10 as uint)
+        master.SetTimeoutTicks(2 as uint)
+        assert master.TryRead(address) == false
+        assert master.LastTimedOut() == true
+        Simulation.Wait(20)
+        target.ConfigureDelays(1 as uint, 2 as uint, 2 as uint, 1 as uint, 2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        master.VerifyWord(address, expected)
+    }
+}

@@ -6,13 +6,13 @@ using Livt.Bus.Wishbone.Testing
 @Test
 component WishboneMasterTest
 {
-	master: WishboneMaster
-	slave: WishboneTestSlave
+	master: WishboneMaster32
+	slave: WishboneTestSlave32
 
 	new()
 	{
-		this.master = new WishboneMaster()
-		this.slave = new WishboneTestSlave(this.master)
+		this.master = new WishboneMaster32()
+		this.slave = new WishboneTestSlave32(this.master)
 	}
 
 	@Test
@@ -41,7 +41,7 @@ component WishboneMasterTest
 		slave.ConfigureAckDelay(20 as uint)
 		assert master.TryWrite32(0x00 as uint, 0x55AA55AA as uint, 0b1111) == false
 		assert master.LastTimedOut() == true
-		assert master.LastResponse() == WishboneMaster.RESPONSE_SLVERR
+		assert master.LastResponse() == WishboneMaster32.RESPONSE_SLVERR
 		assert master.cyc == 0b0
 		assert master.stb == 0b0
 
@@ -50,6 +50,6 @@ component WishboneMasterTest
 		master.SetTimeoutTicks(10 as uint)
 		assert master.TryRead32(0x00 as uint) == true
 		assert master.LastReadValue() == (0x00000000 as uint)
-		assert master.LastResponse() == WishboneMaster.RESPONSE_OKAY
+		assert master.LastResponse() == WishboneMaster32.RESPONSE_OKAY
 	}
 }

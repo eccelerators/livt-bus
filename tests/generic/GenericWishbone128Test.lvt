@@ -1,0 +1,42 @@
+namespace Livt.Bus.Tests.Generic
+using Livt.Bus.Wishbone.Testing
+/** Native-width transfers, high address/data bits, byte lanes, errors and recovery. */
+@Test
+component GenericWishbone128Test {
+    const LANES: int = 128 / 8
+    master: WishboneTestMaster<40,128>
+    target: WishboneTestSlave<40,128>
+    new() {
+        this.master = new WishboneTestMaster<40,128>()
+        this.target = new WishboneTestSlave<40,128>(this.master)
+    }
+    @Test fn NativeTransfersAndRecovery() {
+        target.Clear()
+        target.ConfigureAckDelay(2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        var address = (1 as Logic[40]) << 36
+        var value = ((0xA5 as Logic[128]) << 120) | (0x1234 as Logic[128])
+        var expected = ((0xBC as Logic[128]) << 120) | (0x1234 as Logic[128])
+        master.WriteWord(address, value)
+        master.VerifyWord(address, value)
+        assert target.observedAddress == address
+        assert target.acceptedWrites == (1 as uint)
+        master.Write8(address | (15 as Logic[40]), 0xBC as byte)
+        master.VerifyWord(address, expected)
+        assert target.acceptedWrites == (2 as uint)
+        assert master.Read8(address | (15 as Logic[40])) == (0xBC as byte)
+        master.WriteMaskedWord(address, ~(0 as Logic[128]), 0 as Logic[LANES])
+        master.VerifyWord(address, expected)
+        assert target.acceptedWrites == (3 as uint)
+        
+        assert master.LastTimedOut() == false
+        target.ConfigureAckDelay(10 as uint)
+        master.SetTimeoutTicks(2 as uint)
+        assert master.TryRead(address) == false
+        assert master.LastTimedOut() == true
+        Simulation.Wait(20)
+        target.ConfigureAckDelay(2 as uint)
+        master.SetTimeoutTicks(100 as uint)
+        master.VerifyWord(address, expected)
+    }
+}

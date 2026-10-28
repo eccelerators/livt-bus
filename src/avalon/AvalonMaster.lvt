@@ -3,39 +3,43 @@ namespace Livt.Bus.Avalon
 using Livt.Bus
 
 /**
- * Reusable 32-bit Avalon-MM transaction master for non-pipelined transfers.
+ * Width-configurable Avalon-MM transaction master for non-pipelined transfers.
  */
-component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
+component AvalonMaster<AddressWidth: int = 32, DataWidth: int = 32, CheckAlignment: bool = true> : IAvalonMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>, IMemoryMappedMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>
 {
+    const BYTE_COUNT: int = DataWidth / 8
+    static assert DataWidth == 32 || DataWidth == 64 || DataWidth == 128, "DataWidth must be 32, 64 or 128"
+    static assert AddressWidth >= Bits.RequiredFor(DataWidth / 8 - 1) && AddressWidth <= 64, "AddressWidth cannot represent byte lanes or exceeds 64"
+
 	/**
 	 * Avalon response code for a successful request.
 	 */
 	public const RESPONSE_OKAY: Logic[2] = 0b00
 	/**
-	 * Byte-enable value selecting all four data lanes.
+	 * Byte-enable value selecting all native data lanes.
 	 */
-	public const ALL_BYTES: Logic[4] = 0b1111
+	public const ALL_BYTES: Logic[BYTE_COUNT] = ~(0 as Logic[BYTE_COUNT])
 
 	timeoutTicks: uint
-	lastReadValue: uint
+	lastReadValue: Logic[DataWidth]
 	lastResponse: Logic[2]
 	lastTimedOut: bool
 
 	// Scheduled command mailbox; held stable until the engine acknowledges release.
-	commandAddress: logic[32]
-	commandWriteData: logic[32]
-	commandByteEnable: logic[4]
+	commandAddress: logic[AddressWidth]
+	commandWriteData: logic[DataWidth]
+	commandByteEnable: logic[BYTE_COUNT]
 	commandIsRead: bool
 	commandPending: bool
 	transferComplete: bool
 
 	// Single-owner request registers and direct response observations.
-	requestAddress: logic[32]
-	requestByteEnable: logic[4]
+	requestAddress: logic[AddressWidth]
+	requestByteEnable: logic[BYTE_COUNT]
 	requestWrite: logic
-	requestWriteData: logic[32]
+	requestWriteData: logic[DataWidth]
 	requestRead: logic
-	targetReadData: logic[32]
+	targetReadData: logic[DataWidth]
 	targetWaitRequest: logic
 	targetResponse: logic[2]
 
@@ -67,7 +71,7 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 	/**
 	 * Returns the data captured by the most recently accepted read.
 	 */
-	override fn LastReadValue() uint
+	override fn LastReadValue() Logic[DataWidth]
 	{
 		return lastReadValue
 	}
@@ -93,8 +97,9 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 	 * Returns true when the request is accepted; inspect LastResponse for status.
 	 * After a timeout, the call holds the request until acceptance before returning.
 	 */
-	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	override fn TryWrite(address: Logic[AddressWidth], value: Logic[DataWidth], byteEnable: Logic[BYTE_COUNT]) bool
 	{
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
 		var completed = this.ExecuteTransfer(address, value, byteEnable, false)
 		return completed
 	}
@@ -104,19 +109,27 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 	 * Returns true when the request is accepted; inspect LastResponse for status.
 	 * After a timeout, the call holds the request until acceptance before returning.
 	 */
-	override fn TryRead32(address: uint) bool
+	override fn TryRead(address: Logic[AddressWidth]) bool
 	{
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
 		var completed = this.ExecuteTransfer(address, 0, ALL_BYTES, true)
 		return completed
 	}
 
+    /** One read with explicit lane enables. Address and enables are transmitted unchanged. */
+    public fn TryReadMasked(address: Logic[AddressWidth], byteEnable: Logic[BYTE_COUNT]) bool {
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
+        var completed = this.ExecuteTransfer(address, 0 as Logic[DataWidth], byteEnable, true)
+        return completed
+    }
+
 	/**
 	 * Submits a stable command and waits for the bus engine to drain the request.
 	 */
-	private fn ExecuteTransfer(address: uint, value: uint, byteEnable: logic[4], isRead: bool) bool
+	private fn ExecuteTransfer(address: Logic[AddressWidth], value: Logic[DataWidth], byteEnable: logic[BYTE_COUNT], isRead: bool) bool
 	{
-		this.commandAddress = address as logic[32]
-		this.commandWriteData = value as logic[32]
+		this.commandAddress = address as logic[AddressWidth]
+		this.commandWriteData = value as logic[DataWidth]
 		this.commandByteEnable = byteEnable
 		this.commandIsRead = isRead
 		this.commandPending = true
@@ -199,7 +212,7 @@ component AvalonMaster : IAvalon32Master, IMemoryMappedMaster32
 		state Active {
 			if (this.targetWaitRequest == 0b0) {
 				if (this.commandIsRead) {
-					this.lastReadValue = this.targetReadData as uint
+					this.lastReadValue = this.targetReadData as Logic[DataWidth]
 				}
 
 				this.lastResponse = this.targetResponse

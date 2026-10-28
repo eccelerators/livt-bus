@@ -6,13 +6,13 @@ using Livt.Bus.Axi4Lite.Testing
 @Test
 component Axi4LiteWriteResponseTimeoutTest
 {
-	master: Axi4LiteTestMaster
-	slave: Axi4LiteTestSlave
+	master: Axi4LiteTestMaster32
+	slave: Axi4LiteTestSlave32
 
 	new()
 	{
-		this.master = new Axi4LiteTestMaster()
-		this.slave = new Axi4LiteTestSlave(this.master)
+		this.master = new Axi4LiteTestMaster32()
+		this.slave = new Axi4LiteTestSlave32(this.master)
 	}
 
 	@Test
@@ -36,13 +36,13 @@ component Axi4LiteWriteResponseTimeoutTest
 @Test
 component Axi4LiteReadAddressTimeoutTest
 {
-	master: Axi4LiteTestMaster
-	slave: Axi4LiteTestSlave
+	master: Axi4LiteTestMaster32
+	slave: Axi4LiteTestSlave32
 
 	new()
 	{
-		master = new Axi4LiteTestMaster()
-		slave = new Axi4LiteTestSlave(master)
+		master = new Axi4LiteTestMaster32()
+		slave = new Axi4LiteTestSlave32(master)
 	}
 
 	@Test
@@ -65,13 +65,13 @@ component Axi4LiteReadAddressTimeoutTest
 @Test
 component Axi4LiteReadDataTimeoutTest
 {
-	master: Axi4LiteTestMaster
-	slave: Axi4LiteTestSlave
+	master: Axi4LiteTestMaster32
+	slave: Axi4LiteTestSlave32
 
 	new()
 	{
-		master = new Axi4LiteTestMaster()
-		slave = new Axi4LiteTestSlave(master)
+		master = new Axi4LiteTestMaster32()
+		slave = new Axi4LiteTestSlave32(master)
 	}
 
 	@Test

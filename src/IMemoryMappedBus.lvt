@@ -1,0 +1,11 @@
+namespace Livt.Bus
+/** Assertion-oriented native transfers and byte helpers; addresses count bytes. */
+interface IMemoryMappedBus<Address, Data, ByteEnable> : IMemoryMappedMaster<Address, Data, ByteEnable> {
+    fn WriteWord(address: Address, value: Data)
+    fn WriteMaskedWord(address: Address, value: Data, byteEnable: ByteEnable)
+    fn ReadWord(address: Address) Data
+    fn VerifyWord(address: Address, expected: Data)
+    fn VerifyMaskedWord(address: Address, expected: Data, mask: Data)
+    fn Write8(address: Address, value: byte)
+    fn Read8(address: Address) byte
+}

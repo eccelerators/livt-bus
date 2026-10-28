@@ -9,16 +9,16 @@ using Livt.Bus.Avalon.Testing
 @Test
 component AvalonTimeoutBoundaryTest
 {
-	master: AvalonMaster
-	target: AvalonTestSlave
+	master: AvalonMaster32
+	target: AvalonTestSlave32
 
 	/**
 	 * Creates a fresh fixture for the successful boundary.
 	 */
 	new()
 	{
-		this.master = new AvalonMaster()
-		this.target = new AvalonTestSlave(this.master)
+		this.master = new AvalonMaster32()
+		this.target = new AvalonTestSlave32(this.master)
 	}
 
 	/**

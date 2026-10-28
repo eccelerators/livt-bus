@@ -1,0 +1,241 @@
+namespace Livt.Bus.Avalon
+
+using Livt.Bus
+
+/**
+ * Reusable 32-bit Avalon-MM transaction master for non-pipelined transfers.
+ */
+component AvalonMaster32 : IAvalon32Master, IMemoryMappedMaster32
+{
+	/**
+	 * Avalon response code for a successful request.
+	 */
+	public const RESPONSE_OKAY: Logic[2] = 0b00
+	/**
+	 * Byte-enable value selecting all four data lanes.
+	 */
+	public const ALL_BYTES: Logic[4] = 0b1111
+
+	timeoutTicks: uint
+	lastReadValue: uint
+	lastResponse: Logic[2]
+	lastTimedOut: bool
+
+	// Scheduled command mailbox; held stable until the engine acknowledges release.
+	commandAddress: logic[32]
+	commandWriteData: logic[32]
+	commandByteEnable: logic[4]
+	commandIsRead: bool
+	commandPending: bool
+	transferComplete: bool
+
+	// Single-owner request registers and direct response observations.
+	requestAddress: logic[32]
+	requestByteEnable: logic[4]
+	requestWrite: logic
+	requestWriteData: logic[32]
+	requestRead: logic
+	targetReadData: logic[32]
+	targetWaitRequest: logic
+	targetResponse: logic[2]
+
+	/**
+	 * Initializes the timeout; reset leaves the bus and command mailbox idle.
+	 */
+	new()
+	{
+		this.timeoutTicks = this.context.TicksFor(1ms)
+	}
+
+	/**
+	 * Sets the maximum ticks to wait for waitrequest to be deasserted.
+	 * The count is exact; zero times out on the first stalled evaluation.
+	 */
+	override fn SetTimeoutTicks(timeoutTicks: uint)
+	{
+		this.timeoutTicks = timeoutTicks
+	}
+
+	/**
+	 * Returns the maximum ticks allowed for a request.
+	 */
+	override fn GetTimeoutTicks() uint
+	{
+		return timeoutTicks
+	}
+
+	/**
+	 * Returns the data captured by the most recently accepted read.
+	 */
+	override fn LastReadValue() uint
+	{
+		return lastReadValue
+	}
+
+	/**
+	 * Returns the Avalon response captured for the most recent accepted request.
+	 */
+	override fn LastResponse() Logic[2]
+	{
+		return lastResponse
+	}
+
+	/**
+	 * Returns true when the most recent request timed out.
+	 */
+	override fn LastTimedOut() bool
+	{
+		return lastTimedOut
+	}
+
+	/**
+	 * Performs one non-pipelined Avalon-MM write using the selected byte lanes.
+	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 * After a timeout, the call holds the request until acceptance before returning.
+	 */
+	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
+	{
+		var completed = this.ExecuteTransfer(address, value, byteEnable, false)
+		return completed
+	}
+
+	/**
+	 * Performs one non-pipelined Avalon-MM read and stores the accepted read data.
+	 * Returns true when the request is accepted; inspect LastResponse for status.
+	 * After a timeout, the call holds the request until acceptance before returning.
+	 */
+	override fn TryRead32(address: uint) bool
+	{
+		var completed = this.ExecuteTransfer(address, 0, ALL_BYTES, true)
+		return completed
+	}
+
+	/**
+	 * Submits a stable command and waits for the bus engine to drain the request.
+	 */
+	private fn ExecuteTransfer(address: uint, value: uint, byteEnable: logic[4], isRead: bool) bool
+	{
+		this.commandAddress = address as logic[32]
+		this.commandWriteData = value as logic[32]
+		this.commandByteEnable = byteEnable
+		this.commandIsRead = isRead
+		this.commandPending = true
+
+		state WaitForCompletion {
+			if (this.transferComplete) {
+				goto Release
+			} else {
+				goto WaitForCompletion
+			}
+		}
+
+		state Release {
+			this.commandPending = false
+			goto WaitForIdle
+		}
+
+		state WaitForIdle {
+			if (this.transferComplete) {
+				goto WaitForIdle
+			} else {
+				goto Finish
+			}
+		}
+
+		state Finish { }
+
+		return !this.lastTimedOut
+	}
+
+	/**
+	 * Wires the bus without retiming its acceptance handshake.
+	 */
+	process Connect[]()
+	{
+		this.address = this.requestAddress
+		this.byteenable = this.requestByteEnable
+		this.write = this.requestWrite
+		this.writedata = this.requestWriteData
+		this.read = this.requestRead
+		this.targetReadData = this.readdata
+		this.targetWaitRequest = this.waitrequest
+		this.targetResponse = this.response
+	}
+
+	/**
+	 * Owns the bus registers. Acceptance captures the response and lowers the
+	 * request on the same clock edge. A deadline never cancels a stalled transfer.
+	 */
+	process Transfer()
+	{
+		var elapsed: uint = 0
+		var deadline: uint = 0
+
+		state Idle {
+			if (this.commandPending) {
+				elapsed = 0
+				deadline = this.timeoutTicks
+				this.lastResponse = RESPONSE_OKAY
+				this.lastTimedOut = false
+				this.requestAddress = this.commandAddress
+				this.requestByteEnable = this.commandByteEnable
+				this.requestWriteData = this.commandWriteData
+
+				if (this.commandIsRead) {
+					this.lastReadValue = 0
+					this.requestRead = 0b1
+					this.requestWrite = 0b0
+				} else {
+					this.requestRead = 0b0
+					this.requestWrite = 0b1
+				}
+
+				goto Active
+			} else {
+				goto Idle
+			}
+		}
+
+		state Active {
+			if (this.targetWaitRequest == 0b0) {
+				if (this.commandIsRead) {
+					this.lastReadValue = this.targetReadData as uint
+				}
+
+				this.lastResponse = this.targetResponse
+				this.requestRead = 0b0
+				this.requestWrite = 0b0
+				this.requestByteEnable = 0b0000
+				this.transferComplete = true
+				goto WaitForRelease
+			} elif ((elapsed + 1) >= deadline) {
+				this.lastTimedOut = true
+				goto Recover
+			} else {
+				elapsed = elapsed + 1
+				goto Active
+			}
+		}
+
+		state Recover {
+			if (this.targetWaitRequest == 0b0) {
+				this.requestRead = 0b0
+				this.requestWrite = 0b0
+				this.requestByteEnable = 0b0000
+				this.transferComplete = true
+				goto WaitForRelease
+			} else {
+				goto Recover
+			}
+		}
+
+		state WaitForRelease {
+			if (this.commandPending) {
+				goto WaitForRelease
+			} else {
+				this.transferComplete = false
+				goto Idle
+			}
+		}
+	}
+}

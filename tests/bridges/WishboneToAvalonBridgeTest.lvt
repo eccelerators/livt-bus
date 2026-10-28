@@ -11,20 +11,20 @@ using Livt.Bus.Wishbone.Testing
 component WishboneToAvalonBridgeTest
 {
 	// Wishbone transaction source under test.
-	upstream: WishboneTestMaster
+	upstream: WishboneTestMaster32
 	// Bridge subject under test.
 	bridge: WishboneToAvalonBridge32
 	// Configurable Avalon-MM target.
-	target: AvalonTestSlave
+	target: AvalonTestSlave32
 
 	/**
 	 * Connects the Wishbone source, bridge, and Avalon target.
 	 */
 	new()
 	{
-		this.upstream = new WishboneTestMaster()
+		this.upstream = new WishboneTestMaster32()
 		this.bridge = new WishboneToAvalonBridge32(this.upstream)
-		this.target = new AvalonTestSlave(this.bridge)
+		this.target = new AvalonTestSlave32(this.bridge)
 	}
 
 	/**

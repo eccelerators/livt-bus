@@ -3,10 +3,14 @@ namespace Livt.Bus.Wishbone
 using Livt.Bus
 
 /**
- * Reusable 32-bit Wishbone Classic single-transfer master.
+ * Width-configurable Wishbone Classic single-transfer master.
  */
-component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
+component WishboneMaster<AddressWidth: int = 32, DataWidth: int = 32, CheckAlignment: bool = true> : IWishboneMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>, IMemoryMappedMaster<Logic[AddressWidth], Logic[DataWidth], Logic[BYTE_COUNT]>
 {
+    const BYTE_COUNT: int = DataWidth / 8
+    static assert DataWidth == 32 || DataWidth == 64 || DataWidth == 128, "DataWidth must be 32, 64 or 128"
+    static assert AddressWidth >= Bits.RequiredFor(DataWidth / 8 - 1) && AddressWidth <= 64, "AddressWidth cannot represent byte lanes or exceeds 64"
+
 	/**
 	 * Status returned after a Wishbone acknowledgement.
 	 */
@@ -16,163 +20,125 @@ component WishboneMaster : IWishbone32Master, IMemoryMappedMaster32
 	 */
 	public const RESPONSE_SLVERR: Logic[2] = 0b10
 	/**
-	 * Byte-select value enabling all four data lanes.
+	 * Byte-select value enabling all native data lanes.
 	 */
-	public const ALL_BYTES: Logic[4] = 0b1111
+	public const ALL_BYTES: Logic[BYTE_COUNT] = ~(0 as Logic[BYTE_COUNT])
 
-	timeoutTicks: uint
-	lastReadValue: uint
-	lastResponse: Logic[2]
-	lastTimedOut: bool
+    timeoutTicks: uint
+    lastReadValue: Logic[DataWidth]
+    lastResponse: Logic[2]
+    lastTimedOut: bool
+    commandAddress: Logic[AddressWidth]
+    commandData: Logic[DataWidth]
+    commandMask: Logic[BYTE_COUNT]
+    commandIsRead: bool
+    commandPending: bool
+    transferComplete: bool
+    request_adr: Logic[AddressWidth]
+    request_datin: Logic[DataWidth]
+    request_sel: Logic[BYTE_COUNT]
+    request_cyc: logic
+    request_stb: logic
+    request_we: logic
+    target_ack: logic
+    target_datout: Logic[DataWidth]
 
-	new()
-	{
-		this.adr = 0x00000000
-		this.sel = 0b0000
-		this.we = 0b0
-		this.stb = 0b0
-		this.datin = 0x00000000
-		this.cyc = 0b0
-		this.timeoutTicks = this.context.TicksFor(1ms)
-		this.lastReadValue = 0
-		this.lastResponse = RESPONSE_OKAY
-		this.lastTimedOut = false
-	}
+    new() { this.timeoutTicks = this.context.TicksFor(1ms) }
+    /** Exact per-stage deadline; acceptance wins at the boundary. */
+    override fn SetTimeoutTicks(timeoutTicks:uint) { this.timeoutTicks = timeoutTicks }
+    override fn GetTimeoutTicks() uint { return this.timeoutTicks }
+    override fn LastReadValue() Logic[DataWidth] { return this.lastReadValue }
+    override fn LastResponse() Logic[2] { return this.lastResponse }
+    override fn LastTimedOut() bool { return this.lastTimedOut }
 
-	/**
-	 * Sets the maximum ticks to wait for a Wishbone acknowledgement.
-	 * The count is exact; zero times out on the first stalled evaluation.
-	 */
-	override fn SetTimeoutTicks(timeoutTicks: uint)
-	{
-		this.timeoutTicks = timeoutTicks
-	}
+    override fn TryWrite(address:Logic[AddressWidth], value:Logic[DataWidth], byteEnable:Logic[BYTE_COUNT]) bool {
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
+        var completed = this.ExecuteTransfer(address,value,byteEnable,false)
+        return completed
+    }
+    override fn TryRead(address:Logic[AddressWidth]) bool {
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
+        var completed = this.ExecuteTransfer(address,0 as Logic[DataWidth],ALL_BYTES,true)
+        return completed
+    }
+    /** One read with explicit lane enables. Address and enables are transmitted unchanged. */
+    public fn TryReadMasked(address: Logic[AddressWidth], byteEnable: Logic[BYTE_COUNT]) bool {
+        if (CheckAlignment) { assert (address & ((BYTE_COUNT - 1) as Logic[AddressWidth])) == (0 as Logic[AddressWidth]) }
+        var completed = this.ExecuteTransfer(address, 0 as Logic[DataWidth], byteEnable, true)
+        return completed
+    }
 
-	/**
-	 * Returns the maximum ticks allowed for an acknowledgement.
-	 */
-	override fn GetTimeoutTicks() uint
-	{
-		return timeoutTicks
-	}
-
-	/**
-	 * Returns the data captured by the most recently acknowledged read.
-	 */
-	override fn LastReadValue() uint
-	{
-		return lastReadValue
-	}
-
-	/**
-	 * Returns the normalized status of the most recent transfer.
-	 */
-	override fn LastResponse() Logic[2]
-	{
-		return lastResponse
-	}
-
-	/**
-	 * Returns true when the most recent transfer timed out without acknowledgement.
-	 */
-	override fn LastTimedOut() bool
-	{
-		return lastTimedOut
-	}
-
-	/**
-	 * Performs one Wishbone Classic write and returns true when ack is received.
-	 */
-	override fn TryWrite32(address: uint, value: uint, byteEnable: Logic[4]) bool
-	{
-		var elapsed: uint = 0
-		var successful: bool = false
-
-		state Start {
-			lastResponse = RESPONSE_OKAY
-			lastTimedOut = false
-			elapsed = 0
-			successful = false
-			this.adr = address as Logic[32]
-			this.sel = byteEnable
-			this.we = 0b1
-			this.datin = value as Logic[32]
-			this.stb = 0b1
-			this.cyc = 0b1
-			goto Transfer
-		}
-
-		state Transfer {
-			if (this.ack == 0b1) {
-				successful = true
-				goto Finish
-			}
-			elif ((elapsed + 1) >= timeoutTicks) {
-				lastResponse = RESPONSE_SLVERR
-				lastTimedOut = true
-				successful = false
-				goto Finish
-			}
-			else {
-				elapsed = elapsed + 1
-				goto Transfer
-			}
-		}
-
-		state Finish {
-			this.cyc = 0b0
-			this.stb = 0b0
-			this.we = 0b0
-			this.sel = 0b0000
-		}
-		return successful
-	}
-
-	/**
-	 * Performs one Wishbone Classic read and returns true when ack is received.
-	 */
-	override fn TryRead32(address: uint) bool
-	{
-		var elapsed: uint = 0
-		var successful: bool = false
-
-		state Start {
-			lastReadValue = 0
-			lastResponse = RESPONSE_OKAY
-			lastTimedOut = false
-			elapsed = 0
-			successful = false
-			this.adr = address as Logic[32]
-			this.sel = ALL_BYTES
-			this.we = 0b0
-			this.stb = 0b1
-			this.cyc = 0b1
-			goto Transfer
-		}
-
-		state Transfer {
-			if (this.ack == 0b1) {
-				lastReadValue = this.datout as uint
-				successful = true
-				goto Finish
-			}
-			elif ((elapsed + 1) >= timeoutTicks) {
-				lastResponse = RESPONSE_SLVERR
-				lastTimedOut = true
-				successful = false
-				goto Finish
-			}
-			else {
-				elapsed = elapsed + 1
-				goto Transfer
-			}
-		}
-
-		state Finish {
-			this.cyc = 0b0
-			this.stb = 0b0
-			this.sel = 0b0000
-		}
-		return successful
-	}
+    /** Scheduled calls own the mailbox; one clocked process owns all bus outputs. */
+    private fn ExecuteTransfer(address:Logic[AddressWidth], value:Logic[DataWidth], mask:Logic[BYTE_COUNT], isRead:bool) bool {
+        this.commandAddress = address
+        this.commandData = value
+        this.commandMask = mask
+        this.commandIsRead = isRead
+        this.commandPending = true
+        state WaitForCompletion {
+            if (this.transferComplete) { goto Release } else { goto WaitForCompletion }
+        }
+        state Release { this.commandPending = false; goto WaitForIdle }
+        state WaitForIdle {
+            if (this.transferComplete) { goto WaitForIdle } else { goto Finish }
+        }
+        state Finish {}
+        return !this.lastTimedOut
+    }
+    /** Direct protocol wires: ready/valid/ack are never sampled by field accessors. */
+    process Connect[]() {
+        this.adr = this.request_adr
+        this.datin = this.request_datin
+        this.sel = this.request_sel
+        this.cyc = this.request_cyc
+        this.stb = this.request_stb
+        this.we = this.request_we
+        this.target_ack = this.ack
+        this.target_datout = this.datout
+    }
+    /** Classic single transfers terminate on ACK or deadline; no pipelining. */
+    process Transfer() {
+        var elapsed:uint = 0
+        var deadline:uint = 0
+        state Idle {
+            if (this.commandPending) {
+                elapsed = 0
+                deadline = this.timeoutTicks
+                if (this.commandIsRead) { this.lastReadValue = 0 }
+                this.lastResponse = RESPONSE_OKAY
+                this.lastTimedOut = false
+                this.request_adr = this.commandAddress
+                this.request_datin = this.commandData
+                this.request_sel = this.commandMask
+                this.request_cyc = 0b1
+                this.request_stb = 0b1
+                if (this.commandIsRead) { this.request_we = 0b0 } else { this.request_we = 0b1 }
+                goto Active
+            } else { goto Idle }
+        }
+        state Active {
+            if (this.target_ack == 0b1) {
+                if (this.commandIsRead) { this.lastReadValue = this.target_datout }
+                this.request_cyc = 0b0
+                this.request_stb = 0b0
+                this.request_we = 0b0
+                this.request_sel = 0 as Logic[BYTE_COUNT]
+                this.transferComplete = true
+                goto WaitForRelease
+            } elif ((elapsed + 1) >= deadline) {
+                this.lastTimedOut = true
+                this.lastResponse = RESPONSE_SLVERR
+                this.request_cyc = 0b0
+                this.request_stb = 0b0
+                this.request_we = 0b0
+                this.request_sel = 0 as Logic[BYTE_COUNT]
+                this.transferComplete = true
+                goto WaitForRelease
+            } else { elapsed = elapsed + 1; goto Active }
+        }
+        state WaitForRelease {
+            if (this.commandPending) { goto WaitForRelease }
+            else { this.transferComplete = false; goto Idle }
+        }
+    }
 }

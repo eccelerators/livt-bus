@@ -1,0 +1,45 @@
+namespace Livt.Bus.Tests.Generic
+using Livt.Bus.Avalon.Testing
+/** Native-width transfers, high address/data bits, byte lanes, errors and recovery. */
+@Test
+component GenericAvalon64Test {
+    const LANES: int = 64 / 8
+    master: AvalonTestMaster<32,64>
+    target: AvalonTestSlave<32,64>
+    new() {
+        this.master = new AvalonTestMaster<32,64>()
+        this.target = new AvalonTestSlave<32,64>(this.master)
+    }
+    @Test fn NativeTransfersAndRecovery() {
+        target.Clear()
+        target.Configure(2 as uint, 0b00)
+        master.SetTimeoutTicks(100 as uint)
+        var address = (1 as Logic[32]) << 28
+        var value = ((0xA5 as Logic[64]) << 56) | (0x1234 as Logic[64])
+        var expected = ((0xBC as Logic[64]) << 56) | (0x1234 as Logic[64])
+        master.WriteWord(address, value)
+        master.VerifyWord(address, value)
+        assert target.observedAddress == address
+        assert target.acceptedWrites == (1 as uint)
+        master.Write8(address | (7 as Logic[32]), 0xBC as byte)
+        master.VerifyWord(address, expected)
+        assert target.acceptedWrites == (2 as uint)
+        assert master.Read8(address | (7 as Logic[32])) == (0xBC as byte)
+        master.WriteMaskedWord(address, ~(0 as Logic[64]), 0 as Logic[LANES])
+        master.VerifyWord(address, expected)
+        assert target.acceptedWrites == (3 as uint)
+        target.Configure(0 as uint, 0b10)
+        assert master.TryRead(address) == true
+        assert master.LastResponse() == 0b10
+        target.Configure(0 as uint, 0b00)
+        assert master.LastTimedOut() == false
+        target.Configure(10 as uint, 0b00)
+        master.SetTimeoutTicks(2 as uint)
+        assert master.TryRead(address) == false
+        assert master.LastTimedOut() == true
+        Simulation.Wait(20)
+        target.Configure(2 as uint, 0b00)
+        master.SetTimeoutTicks(100 as uint)
+        master.VerifyWord(address, expected)
+    }
+}
